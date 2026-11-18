@@ -221,14 +221,17 @@ final class Guard: ObservableObject {
     }
 
     func update(_ ok: Bool, _ procs: [Proc]? = nil) {
+        let before = protected
         if protected != ok {
-            // The journal: an outage opens when a connection that was there is lost, and closes when it is back.
-            if live, protected == true { Journal.shared.mark(connected: false, off: !enabled) }
-            if live, protected == false { Journal.shared.mark(connected: true) }
             protected = ok
             since = Date()
         }
-        apply(procs)
+        apply(procs) // freeze first: nothing may stand between a drop and the stop signals
+        guard live else { return }
+        // The journal: an outage opens when a connection that was there is lost, and closes when it is back.
+        if before == true, !ok { Journal.shared.mark(connected: false, off: !enabled) }
+        if before == false, ok { Journal.shared.mark(connected: true) }
+        if !ok, freezing { Journal.shared.froze(entries.filter { running.contains($0.id) && $0.off != true }.map(\.name)) }
     }
 
     func apply(_ scanned: [Proc]? = nil) {
@@ -255,7 +258,6 @@ final class Guard: ObservableObject {
         for pid in frozen.subtracting(target) { signal(pid, SIGCONT) }
         frozen = target
         if running != up { running = up }
-        if live, protected == false, freezing { Journal.shared.froze(entries.filter { up.contains($0.id) && $0.off != true }.map(\.name)) }
     }
 
     func thawAll() {
@@ -406,8 +408,11 @@ func selftest() {
     precondition(Journal.facts(j.outages[0]) == ["Заморожено: Claude, ChatGPT", "Ворота отказали: 2 соединения"])
     let journalFile = NSTemporaryDirectory() + "zaslon-journal-test.json"
     try? FileManager.default.removeItem(atPath: journalFile)
-    Journal(file: journalFile).mark(connected: false, at: t0)
+    let kept = Journal(file: journalFile)
+    kept.outages = [Outage(start: t0, frozen: ["Claude"], off: true)]
+    kept.store(wait: true)
     precondition(Journal(file: journalFile).outages.map(\.end) == [t0], "an outage left open by a quit is read back closed, with no length")
+    precondition(Journal.facts(kept.outages[0]) == ["Заморожено: Claude"] && Journal.facts(Outage(start: t0, off: true)) == ["Защита была выключена"], "what was frozen is shown even if the outage began with protection off")
     try? FileManager.default.removeItem(atPath: journalFile)
     // The very lines that will run with admin rights, here without them and in a scratch folder.
     let folder = NSTemporaryDirectory() + "zaslon-rule-test"

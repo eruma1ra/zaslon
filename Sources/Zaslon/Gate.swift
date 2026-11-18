@@ -92,7 +92,8 @@ final class Gate: ObservableObject {
             guard let name = serverName(hello), Self.covers(name) else { return client.cancel() }
             self.tunnel.open(name, 443) { upstream in
                 guard let upstream else {
-                    DispatchQueue.main.async { Journal.shared.refuse() }
+                    // Only a refusal for lack of a tunnel is a fact about an outage; a failed lookup or route is not.
+                    if self.tunnel.interface == nil { DispatchQueue.main.async { Journal.shared.refuse() } }
                     return client.cancel()
                 }
                 upstream.send(content: Data(hello), completion: .contentProcessed { _ in })

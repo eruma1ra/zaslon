@@ -17,6 +17,8 @@ final class Journal: ObservableObject {
 
     @Published var outages: [Outage] = [] // newest first
     private let file: String?
+    private var saving = false
+    private static let disk = DispatchQueue(label: "zaslon.journal") // one writer, so files land in the order they were made
 
     /// `file: nil` keeps the journal in memory only (tests).
     init(file: String?) {
@@ -50,7 +52,9 @@ final class Journal: ObservableObject {
     func froze(_ names: [String]) {
         guard outages.first?.end == nil, let known = outages.first?.frozen else { return }
         let all = known + names.filter { !known.contains($0) }
-        if all != known { outages[0].frozen = all }
+        guard all != known else { return }
+        outages[0].frozen = all
+        save()
     }
 
     /// The gate turned a connection away. Only counts while an outage is open.
@@ -59,12 +63,28 @@ final class Journal: ObservableObject {
     func refuse() {
         guard outages.first?.end == nil, !outages.isEmpty else { return }
         outages[0].refused += 1
+        save()
     }
 
+    /// Writes the file half a second later and off the main thread. The journal is fed from the path that freezes
+    /// apps, and nothing there may wait for the disk; changes that come in a burst share one write.
     private func save() {
+        guard file != nil, !saving else { return }
+        saving = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            self.saving = false
+            self.store(wait: false)
+        }
+    }
+
+    /// Writes the file. `wait: true` returns only when it is on disk (tests).
+    func store(wait: Bool) {
         guard let file, let data = try? Self.coder.0.encode(outages) else { return }
-        try? FileManager.default.createDirectory(atPath: (file as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
-        try? data.write(to: URL(fileURLWithPath: file), options: .atomic)
+        let write = {
+            try? FileManager.default.createDirectory(atPath: (file as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+            try? data.write(to: URL(fileURLWithPath: file), options: .atomic)
+        }
+        if wait { Self.disk.sync { _ = write() } } else { Self.disk.async { _ = write() } }
     }
 
     // MARK: words
@@ -94,9 +114,10 @@ final class Journal: ObservableObject {
 
     /// What the outage did, one fact per line.
     static func facts(_ o: Outage) -> [String] {
-        var lines = [o.off ? t("Защита была выключена", "Protection was switched off")
-            : o.frozen.isEmpty ? t("Программы из списка не были запущены", "No app from the list was running")
-            : t("Заморожено: ", "Frozen: ") + o.frozen.joined(separator: ", ")]
+        // Protection can be switched on in the middle of an outage: what was then frozen comes first.
+        var lines = [!o.frozen.isEmpty ? t("Заморожено: ", "Frozen: ") + o.frozen.joined(separator: ", ")
+            : o.off ? t("Защита была выключена", "Protection was switched off")
+            : t("Программы из списка не были запущены", "No app from the list was running")]
         if o.refused > 0 { lines.append(t("Ворота отказали: ", "The gate refused: ") + connections(o.refused)) }
         return lines
     }
