@@ -14,6 +14,21 @@ If the VPN is not there, ChatGPT and Claude cannot reach their servers at all, a
 
 > Zaslon works with **Cloudflare WARP** only. The interface comes in English and Russian.
 
+## Get it
+
+**Homebrew**
+
+```bash
+brew tap eruma1ra/zaslon https://github.com/eruma1ra/zaslon
+brew trust eruma1ra/zaslon
+brew install zaslon
+zaslon
+```
+
+**Or download** the disk image from the [latest release](https://github.com/eruma1ra/zaslon/releases/latest) and drag Zaslon to Applications.
+
+Details, and what macOS asks on the first launch, are under [Install](#install).
+
 ## What it does
 
 | Traffic | How it is protected | Window after a VPN drop |
@@ -134,9 +149,35 @@ Controls:
 
 - macOS 14 or newer
 - [Cloudflare WARP](https://developers.cloudflare.com/warp-client/) with `warp-cli` at `/usr/local/bin/warp-cli`
-- The Swift toolchain (Xcode or the Command Line Tools). No Xcode project is needed.
 
-## Build and run
+## Install
+
+### Homebrew (recommended)
+
+```bash
+brew tap eruma1ra/zaslon https://github.com/eruma1ra/zaslon
+brew trust eruma1ra/zaslon
+brew install zaslon
+zaslon
+```
+
+`brew trust` tells Homebrew that you accept a tap outside its own collection; an older Homebrew does not have this command and does not need it, so skip that line there.
+
+Homebrew builds Zaslon from source on your Mac, so macOS does not question it. It needs the Xcode Command Line Tools, which Homebrew installs anyway. `zaslon` opens the menu bar app; with arguments it runs a check, for example `zaslon --selftest`.
+
+After `brew upgrade zaslon`, run `zaslon` once more: macOS starts the launch agent of a rebuilt app only after the app has registered it again.
+
+### Download
+
+Get `Zaslon-<version>.dmg` from the [latest release](https://github.com/eruma1ra/zaslon/releases/latest), open it and drag Zaslon to Applications. The app runs on Apple silicon and Intel.
+
+Zaslon is not signed with an Apple Developer ID, so the first launch is stopped by macOS. Either allow it in **System Settings → Privacy & Security → Open Anyway**, or clear the download mark:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/Zaslon.app
+```
+
+### Build from source
 
 ```bash
 git clone https://github.com/eruma1ra/zaslon.git
@@ -145,11 +186,13 @@ cd zaslon
 open build/Zaslon.app
 ```
 
-`build.sh` compiles a release build, assembles `build/Zaslon.app` and signs it ad hoc. There is no Developer ID and no notarization: build it on the Mac that will run it.
+`build.sh` needs only the Swift toolchain (Xcode or the Command Line Tools; no Xcode project). It compiles a release build, assembles `build/Zaslon.app` and signs it ad hoc. `./build.sh dmg` builds for both chip families and packs the disk image.
 
-Open the app once after every rebuild. macOS refuses to start the launch agent of a rebuilt app until the app has registered it again, and Zaslon does that on launch.
+Open the app once after every rebuild, for the same launch agent reason as above.
 
-On first launch Zaslon asks whether to start at login. With autostart on, macOS restarts it if it ever crashes (measured: back in 0.2 s).
+### First launch
+
+Zaslon asks whether to start at login. With autostart on, macOS restarts it if it ever crashes (measured: back in 0.2 s).
 
 ## Good to know
 
@@ -166,7 +209,7 @@ sudo sh -c 'for d in chatgpt.com openai.com oaistatic.com oaiusercontent.com ant
 
 ## Checking it yourself
 
-Everything runs from the binary inside the bundle, `build/Zaslon.app/Contents/MacOS/Zaslon`.
+Everything runs from the binary inside the bundle, `Zaslon.app/Contents/MacOS/Zaslon`. With Homebrew it is simply `zaslon <command>`.
 
 | Command | What it does |
 |---|---|
@@ -204,10 +247,6 @@ Everything runs from the binary inside the bundle, `build/Zaslon.app/Contents/Ma
 | `Sources/Zaslon/Proxy.swift` | Tunnel-pinned connections, the real-address lookup, the `CONNECT` proxy. |
 | `Sources/Zaslon/App.swift` | The menu bar window, autostart, test windows. |
 | `build.sh`, `icon.swift` | Builds the app bundle; draws the icon. |
-
-## Credits
-
-The idea of a per-app kill switch that freezes apps comes from [Kordon](https://kordon.tech). Zaslon is an independent implementation; the gate and the tunnel proxy are its own.
 
 ## Author
 

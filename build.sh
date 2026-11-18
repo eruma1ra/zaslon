@@ -2,13 +2,23 @@
 # Builds build/Zaslon.app. A rebuild changes the app's signature, and the system then refuses to start the launch
 # agent until it is registered again: open the app once by hand after every build and it repairs that itself.
 # Check the logic with: build/Zaslon.app/Contents/MacOS/Zaslon --selftest
+#   ./build.sh       the app for this Mac
+#   ./build.sh dmg   the app for both chip families, packed as build/Zaslon-<version>.dmg for a release
+# SWIFT_BUILD_FLAGS is passed on to `swift build` (Homebrew needs --disable-sandbox).
 set -e
 cd "$(dirname "$0")"
-swift build -c release
+if [ "$1" = dmg ]; then
+    for arch in arm64 x86_64; do swift build -c release --triple "$arch-apple-macosx14.0" $SWIFT_BUILD_FLAGS; done
+    lipo -create .build/arm64-apple-macosx/release/Zaslon .build/x86_64-apple-macosx/release/Zaslon -output .build/Zaslon-universal
+    BINARY=.build/Zaslon-universal
+else
+    swift build -c release $SWIFT_BUILD_FLAGS
+    BINARY=.build/release/Zaslon
+fi
 APP=build/Zaslon.app
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS"
-cp .build/release/Zaslon "$APP/Contents/MacOS/"
+cp "$BINARY" "$APP/Contents/MacOS/Zaslon"
 mkdir -p "$APP/Contents/Resources"
 cp AppIcon.icns "$APP/Contents/Resources/" # drawn by icon.swift
 cat > "$APP/Contents/Info.plist" <<'EOF'
@@ -20,7 +30,8 @@ cat > "$APP/Contents/Info.plist" <<'EOF'
 <key>CFBundleExecutable</key><string>Zaslon</string>
 <key>CFBundleIconFile</key><string>AppIcon</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>0.1</string>
+<key>CFBundleShortVersionString</key><string>1.0.0</string>
+<key>CFBundleVersion</key><string>1.0.0</string>
 <key>LSMinimumSystemVersion</key><string>14.0</string>
 <key>LSUIElement</key><true/>
 </dict></plist>
@@ -42,3 +53,12 @@ cat > "$APP/Contents/Library/LaunchAgents/local.zaslon.agent.plist" <<'EOF'
 EOF
 codesign --force --sign - "$APP"
 echo "built $APP"
+if [ "$1" = dmg ]; then
+    rm -rf build/dmg
+    mkdir -p build/dmg
+    cp -R "$APP" build/dmg/
+    ln -s /Applications build/dmg/Applications # drag the app onto it
+    hdiutil create -quiet -volname Zaslon -srcfolder build/dmg -ov -format UDZO build/Zaslon-1.0.0.dmg
+    rm -rf build/dmg
+    echo "built build/Zaslon-1.0.0.dmg"
+fi
