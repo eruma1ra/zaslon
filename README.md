@@ -20,6 +20,7 @@ If the VPN is not there, ChatGPT and Claude cannot reach their servers at all, a
 
 ```bash
 brew tap eruma1ra/zaslon https://github.com/eruma1ra/zaslon
+brew trust eruma1ra/zaslon
 brew install zaslon
 zaslon
 ```
@@ -155,9 +156,12 @@ Controls:
 
 ```bash
 brew tap eruma1ra/zaslon https://github.com/eruma1ra/zaslon
+brew trust eruma1ra/zaslon
 brew install zaslon
 zaslon
 ```
+
+`brew trust` tells Homebrew that you accept a tap outside its own collection; an older Homebrew does not have this command and does not need it, so skip that line there.
 
 Homebrew builds Zaslon from source on your Mac, so macOS does not question it. It needs the Xcode Command Line Tools, which Homebrew installs anyway. `zaslon` opens the menu bar app; with arguments it runs a check, for example `zaslon --selftest`.
 

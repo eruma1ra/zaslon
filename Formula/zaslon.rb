@@ -1,5 +1,6 @@
 # Builds Zaslon from source on the user's Mac, so macOS has no reason to question the app.
 #   brew tap eruma1ra/zaslon https://github.com/eruma1ra/zaslon
+#   brew trust eruma1ra/zaslon
 #   brew install zaslon
 class Zaslon < Formula
   desc "VPN kill switch for AI apps: ChatGPT and Claude only through the WARP tunnel"
