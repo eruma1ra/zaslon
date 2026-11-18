@@ -117,7 +117,7 @@ final class Journal: ObservableObject {
         // Protection can be switched on in the middle of an outage: what was then frozen comes first.
         var lines = [!o.frozen.isEmpty ? t("Заморожено: ", "Frozen: ") + o.frozen.joined(separator: ", ")
             : o.off ? t("Защита была выключена", "Protection was switched off")
-            : t("Программы из списка не были запущены", "No app from the list was running")]
+            : t("Ничего не заморожено", "Nothing was frozen")] // no reason given: Zaslon does not know why
         if o.refused > 0 { lines.append(t("Ворота отказали: ", "The gate refused: ") + connections(o.refused)) }
         return lines
     }

@@ -223,7 +223,22 @@ func watchStalls() {
 }
 
 final class Delegate: NSObject, NSApplicationDelegate {
+    private var asked: DispatchSourceSignal?
+
+    /// Quit from the menu or at logout: the journal's last changes go to disk first.
+    func applicationWillTerminate(_: Notification) { Journal.shared.store(wait: true) }
+
     func applicationDidFinishLaunching(_: Notification) {
+        // Asked to stop by a signal (a newer copy taking over, `kill`): the same, then leave with an error code, so
+        // that the system's launch agent starts Zaslon again exactly as it did before this handler existed.
+        signal(SIGTERM, SIG_IGN)
+        let asked = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
+        asked.setEventHandler {
+            Journal.shared.store(wait: true)
+            exit(1)
+        }
+        asked.resume()
+        self.asked = asked
         Catalog.shared.keepAutostart() // also warms the app list and icons, so the first "Add" is instant
         TunnelProxy.shared.start()
         Gate.shared.start()
