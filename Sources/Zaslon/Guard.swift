@@ -20,7 +20,7 @@ struct Entry: Codable, Identifiable, Equatable {
 
     static let defaults = [
         Entry(name: "Claude", matches: ["/Applications/Claude.app", "claude"]),
-        Entry(name: t("ChatGPT и Codex", "ChatGPT and Codex"), matches: ["/Applications/ChatGPT.app", "codex"]),
+        Entry(name: "ChatGPT + Codex", matches: ["/Applications/ChatGPT.app", "codex"]),
     ]
 }
 
