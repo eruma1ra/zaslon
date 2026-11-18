@@ -150,6 +150,7 @@ final class Guard: ObservableObject {
     /// The tunnels that existed at the last "connected" answer. Written on the main thread, read by the tripwire.
     private let known = OSAllocatedUnfairLock(initialState: Set<String>())
     private var wire: DispatchSourceTimer?
+    private var noted: Bool? // the connection state the journal has seen last
 
     /// Unknown counts as unprotected: the list is frozen from the first moment and thawed by the first "connected".
     var freezing: Bool { protected != true && enabled }
@@ -252,6 +253,13 @@ final class Guard: ObservableObject {
         for pid in frozen.subtracting(target) { signal(pid, SIGCONT) }
         frozen = target
         if running != up { running = up }
+        // The journal is fed here and nowhere else: every freeze is decided in this function, whatever led to it
+        // (a drop, the shield, a change to the list), and the stop signals above have already been sent.
+        guard live else { return }
+        if noted == true, protected == false { Journal.shared.mark(connected: false, off: !enabled) }
+        if noted == false, protected == true { Journal.shared.mark(connected: true) }
+        noted = protected
+        if protected == false, freezing { Journal.shared.froze(entries.filter { up.contains($0.id) && $0.off != true }.map(\.name)) }
     }
 
     func thawAll() {
@@ -386,6 +394,30 @@ func selftest() {
     precondition(connections(getpid()).contains { $0.local == "127.0.0.1" && $0.remote == "127.0.0.1" }, "the reader sees our own connection with both addresses right")
     precondition(!leavesOutside(getpid(), tunnelAddresses()), "this process has no connection outside the tunnel")
     close(client); close(server)
+    // The journal: an outage opens once, collects what was frozen and refused, closes, and survives a restart.
+    let (j, t0) = (Journal(file: nil), Date(timeIntervalSince1970: 1_800_000_000))
+    j.refuse(); j.froze(["X"]); j.mark(connected: true, at: t0)
+    precondition(j.outages.isEmpty, "nothing is written while no outage is open")
+    j.mark(connected: false, at: t0); j.mark(connected: false, at: t0 + 5)
+    j.froze(["Claude"]); j.froze(["ChatGPT", "Claude"]); j.refuse(); j.refuse()
+    j.mark(connected: true, at: t0 + 163)
+    precondition(j.outages.count == 1 && j.outages[0].frozen == ["Claude", "ChatGPT"] && j.outages[0].refused == 2 && j.outages[0].end == t0 + 163, "one outage with its facts")
+    Lang.shared.code = "en"
+    precondition(Journal.lasted(163) == "2 min 43 s" && Journal.lasted(28) == "28 s" && Journal.lasted(3900) == "1 h 5 min", "lengths read naturally")
+    precondition(Journal.connections(1) == "1 connection" && Journal.connections(3) == "3 connections")
+    Lang.shared.code = "ru"
+    precondition(["1 соединение", "3 соединения", "11 соединений", "21 соединение", "25 соединений"] == [1, 3, 11, 21, 25].map(Journal.connections), "Russian counts take the right form")
+    precondition(Journal.facts(j.outages[0]) == ["Заморожено: Claude, ChatGPT", "Ворота отказали: 2 соединения"])
+    let journalFile = NSTemporaryDirectory() + "zaslon-journal-test.json"
+    try? FileManager.default.removeItem(atPath: journalFile)
+    let kept = Journal(file: journalFile)
+    kept.outages = [Outage(start: t0, frozen: ["Claude"], off: true), Outage(start: t0 - 60, end: t0 - 59.6)]
+    kept.store(wait: true)
+    let read = Journal(file: journalFile).outages
+    precondition(read.map(\.cut) == [true, nil] && abs(read[1].end!.timeIntervalSince(t0 - 59.6)) < 0.001, "an outage left open by a quit is read back as cut short; one under a second keeps its length")
+    precondition(Journal.span(read[0]).hasSuffix("– ?") && !Journal.span(read[1]).hasSuffix("?"))
+    precondition(Journal.facts(kept.outages[0]) == ["Заморожено: Claude"] && Journal.facts(Outage(start: t0, off: true)) == ["Защита была выключена"], "what was frozen is shown even if the outage began with protection off")
+    try? FileManager.default.removeItem(atPath: journalFile)
     // The very lines that will run with admin rights, here without them and in a scratch folder.
     let folder = NSTemporaryDirectory() + "zaslon-rule-test"
     try? FileManager.default.removeItem(atPath: folder)
