@@ -545,14 +545,18 @@ let corner: CGFloat = 6 // one rounding for every button and row
 /// so it looked switched off in pictures and differed between themes.
 struct Switch: ToggleStyle {
     func makeBody(configuration: Configuration) -> some View {
-        Capsule().fill(configuration.isOn ? Color.green : Color.primary.opacity(0.18))
-            .frame(width: 32, height: 18)
-            .overlay(alignment: configuration.isOn ? .trailing : .leading) {
-                Circle().fill(.white).shadow(color: .black.opacity(0.25), radius: 1, y: 0.5).padding(2)
-            }
-            .animation(.snappy(duration: 0.18), value: configuration.isOn)
-            .contentShape(Capsule())
-            .onTapGesture { configuration.isOn.toggle() }
+        // A button, so keyboard focus and Space still flip it; to VoiceOver it stays an ordinary switch.
+        Button { configuration.isOn.toggle() } label: {
+            Capsule().fill(configuration.isOn ? Color.green : Color.primary.opacity(0.18))
+                .frame(width: 32, height: 18)
+                .overlay(alignment: configuration.isOn ? .trailing : .leading) {
+                    Circle().fill(.white).shadow(color: .black.opacity(0.25), radius: 1, y: 0.5).padding(2)
+                }
+                .animation(.snappy(duration: 0.18), value: configuration.isOn)
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityRepresentation { Toggle(isOn: configuration.$isOn) { configuration.label } }
     }
 }
 
