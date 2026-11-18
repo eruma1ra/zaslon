@@ -170,7 +170,7 @@ final class Gate: ObservableObject {
         let quoted = shell.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
         let ask = Process()
         ask.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-        ask.arguments = ["-e", "do shell script \"\(quoted)\"" + (admin ? " with prompt \"Zaslon меняет правило DNS для ворот VPN.\" with administrator privileges" : "")]
+        ask.arguments = ["-e", "do shell script \"\(quoted)\"" + (admin ? " with prompt \"\(t("Zaslon меняет правило DNS для ворот VPN.", "Zaslon is changing the DNS rule of the VPN gate."))\" with administrator privileges" : "")]
         ask.terminationHandler = { _ in then() }
         try? ask.run()
         return ask
@@ -304,7 +304,9 @@ func connections(_ pid: pid_t) -> [(local: String, remote: String)] {
         var text = [CChar](repeating: 0, count: Int(INET6_ADDRSTRLEN))
         func name(_ address: UnsafeMutableRawPointer, _ v4: Bool) -> String {
             inet_ntop(v4 ? AF_INET : AF_INET6, v4 ? address + 12 : address, &text, socklen_t(text.count)) // IPv4 sits in the last 4 of the 16 bytes
-            return String(cString: text)
+            // An IPv4 connection on an IPv6 socket reads as "::1.2.3.4" or "::ffff:1.2.3.4": keep the IPv4 part.
+            let read = String(cString: text)
+            return read.contains(".") ? String(read.split(separator: ":").last ?? "") : read
         }
         let v4 = ends.insi_vflag & UInt8(INI_IPV4) != 0
         let local = withUnsafeMutablePointer(to: &ends.insi_laddr) { name(UnsafeMutableRawPointer($0), v4) }

@@ -20,7 +20,7 @@ struct Entry: Codable, Identifiable, Equatable {
 
     static let defaults = [
         Entry(name: "Claude", matches: ["/Applications/Claude.app", "claude"]),
-        Entry(name: "ChatGPT и Codex", matches: ["/Applications/ChatGPT.app", "codex"]),
+        Entry(name: t("ChatGPT и Codex", "ChatGPT and Codex"), matches: ["/Applications/ChatGPT.app", "codex"]),
     ]
 }
 
@@ -440,9 +440,16 @@ func cover(matches: [String]) {
     let pids = tree(of: Entry(name: "", matches: matches), in: procs)
     for proc in procs where pids.contains(proc.pid) { print(proc.pid, "parent", proc.ppid, proc.path.isEmpty ? "(file gone) " + proc.origin : proc.path) }
     print("\(pids.count) processes")
-    let (links, inside) = (pids.flatMap { connections($0) }, tunnelAddresses())
-    var count: [String: Int] = [:]
-    for link in links { count[(outside(local: link.local, remote: link.remote, tunnel: inside) ? "OUTSIDE the VPN  " : "") + link.local + " -> " + link.remote, default: 0] += 1 }
+    let inside = tunnelAddresses()
+    var (links, count) = (0, [String: Int]())
+    for proc in procs where pids.contains(proc.pid) {
+        for link in connections(proc.pid) {
+            links += 1
+            // An outside connection is named with its process: that is the one to look at.
+            let out = link.local != "0.0.0.0" && link.local != "::" && outside(local: link.local, remote: link.remote, tunnel: inside)
+            count[(out ? "OUTSIDE the VPN  " : "") + link.local + " -> " + link.remote + (out ? "  [\(proc.pid) \((proc.path as NSString).lastPathComponent)]" : ""), default: 0] += 1
+        }
+    }
     for (line, n) in count.sorted(by: { $0.value > $1.value }) { print(String(format: "%4d  ", n) + line) }
-    print("\(links.count) connections, tunnel addresses: \(inside.sorted().joined(separator: ", "))")
+    print("\(links) connections, tunnel addresses: \(inside.sorted().joined(separator: ", "))")
 }

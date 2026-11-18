@@ -81,12 +81,15 @@ func relaunchSoon() {
     if bench { watchStalls() }
     let catalog = Catalog.shared
     catalog.refresh()
+    if let ui = ProcessInfo.processInfo.environment["UI"] { Lang.shared.code = ui } // UI=en|ru: the language of the test window, not saved
     let g = Guard(live: false)
     g.signal = { _, _ in }
     g.update(true)
-    let window = NSWindow(contentViewController: NSHostingController(rootView: Panel(g: g)))
+    let content = NSHostingController(rootView: Panel(g: g))
+    // For a picture the window must look the same on every run, so it never becomes the active one.
+    let window = ProcessInfo.processInfo.environment["SHOT"] != nil ? Still(contentViewController: content) : NSWindow(contentViewController: content)
     window.styleMask = [.titled, .closable]
-    window.title = "Zaslon (проверка)"
+    window.title = t("Zaslon (проверка)", "Zaslon (test)")
     window.setFrameTopLeftPoint(NSPoint(x: 60, y: (NSScreen.main?.visibleFrame.maxY ?? 800) - 60))
     window.orderFrontRegardless()
     func scrollView(in view: NSView) -> NSScrollView? { view as? NSScrollView ?? view.subviews.lazy.compactMap(scrollView).first }
@@ -116,7 +119,7 @@ func relaunchSoon() {
             after(2.6) { withAnimation(.snappy(duration: 0.3)) { g.enabled = true } }
         }
         Chip.showHover = env["HOVER"] != nil
-        Gate.shared.look()
+        Gate.shared.ruled = Set(Gate.services.map(\.app)) // the test window shows the normal state, not this Mac's facts of the moment
         if mode == "--picker" {
             catalog.picking = true
             after(1.5) { scroll(400) }
@@ -211,17 +214,17 @@ func watchStalls() {
 
 final class Delegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_: Notification) {
-        Catalog.shared.keepAutostart() // also warms the app list and icons, so the first "Добавить" is instant
+        Catalog.shared.keepAutostart() // also warms the app list and icons, so the first "Add" is instant
         TunnelProxy.shared.start()
         Gate.shared.start()
         Gate.shared.watch()
         guard !UserDefaults.standard.bool(forKey: "askedLogin") else { return }
         UserDefaults.standard.set(true, forKey: "askedLogin")
         let a = NSAlert()
-        a.messageText = "Запускать Zaslon при входе в систему?"
-        a.informativeText = "Без автозапуска защита не работает, пока вы не откроете программу сами. Поменять можно в окне программы."
-        a.addButton(withTitle: "Запускать")
-        a.addButton(withTitle: "Не сейчас")
+        a.messageText = t("Запускать Zaslon при входе в систему?", "Start Zaslon at login?")
+        a.informativeText = t("Без автозапуска защита не работает, пока вы не откроете программу сами. Поменять можно в окне программы.", "Without autostart the protection does not work until you open the app yourself. You can change this in the app's window.")
+        a.addButton(withTitle: t("Запускать", "Start at login"))
+        a.addButton(withTitle: t("Не сейчас", "Not now"))
         NSApp.activate(ignoringOtherApps: true)
         if a.runModal() == .alertFirstButtonReturn { Catalog.shared.setLogin(true) }
     }
@@ -538,6 +541,41 @@ struct SoftTrack: NSViewRepresentable {
 
 let corner: CGFloat = 6 // one rounding for every button and row
 
+/// The system's small switch, drawn by hand. The system one turns grey whenever its window is not the active one,
+/// so it looked switched off in pictures and differed between themes.
+struct Switch: ToggleStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        Capsule().fill(configuration.isOn ? Color.green : Color.primary.opacity(0.18))
+            .frame(width: 32, height: 18)
+            .overlay(alignment: configuration.isOn ? .trailing : .leading) {
+                Circle().fill(.white).shadow(color: .black.opacity(0.25), radius: 1, y: 0.5).padding(2)
+            }
+            .animation(.snappy(duration: 0.18), value: configuration.isOn)
+            .contentShape(Capsule())
+            .onTapGesture { configuration.isOn.toggle() }
+    }
+}
+
+/// A window that never becomes active: pictures of it come out the same whatever else is on screen.
+final class Still: NSWindow {
+    override var canBecomeKey: Bool { false }
+    override var canBecomeMain: Bool { false }
+}
+
+/// The interface language: Russian or English. Every string is written in place, as `t("русский", "English")`.
+final class Lang: ObservableObject {
+    static let shared = Lang()
+    /// Starts from the system language; a choice made in the settings is remembered.
+    @Published var code = UserDefaults.standard.string(forKey: "language") ?? (Locale.preferredLanguages.first?.hasPrefix("ru") == true ? "ru" : "en")
+
+    func choose(_ code: String) {
+        self.code = code
+        UserDefaults.standard.set(code, forKey: "language")
+    }
+}
+
+func t(_ ru: String, _ en: String) -> String { Lang.shared.code == "ru" ? ru : en }
+
 /// The shared look of a button or row: a rounded box that fills in under the mouse.
 struct Chip: ViewModifier {
     static var showHover = false // HOVER=1 in the test window, to take a picture of the hover look
@@ -624,11 +662,12 @@ struct ShieldButton: View {
 
 struct QuitButton: View {
     let action: () -> Void
+    @ObservedObject private var lang = Lang.shared
     @State private var hover = false
 
     var body: some View {
         Button(action: action) {
-            Text("Выйти").foregroundStyle(hover ? Color.red : .secondary).padding(.vertical, 5).contentShape(Rectangle())
+            Text(t("Выйти", "Quit")).foregroundStyle(hover ? Color.red : .secondary).padding(.vertical, 5).contentShape(Rectangle())
         }
         .buttonStyle(.plain).onHover { hover = $0 }
     }
@@ -655,6 +694,7 @@ struct Panel: View {
     @ObservedObject var g: Guard
     @ObservedObject var catalog: Catalog
     @ObservedObject var gate = Gate.shared
+    @ObservedObject var lang = Lang.shared // every string below is read again when the language changes
     @State private var settings = ProcessInfo.processInfo.environment["GEAR"] != nil // GEAR=1: open in the test window
     @FocusState private var searching: Bool
 
@@ -666,7 +706,7 @@ struct Panel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 10) {
-                ShieldButton(g: g).help(g.enabled ? "Выключить защиту" : "Включить защиту")
+                ShieldButton(g: g).help(g.enabled ? t("Выключить защиту", "Switch protection off") : t("Включить защиту", "Switch protection on"))
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title).font(.system(size: 15, weight: .semibold)).contentTransition(.opacity)
                     HStack(spacing: 0) {
@@ -681,7 +721,7 @@ struct Panel: View {
                         .foregroundStyle(settings ? HierarchicalShapeStyle.primary : .secondary)
                         .frame(width: 28, height: 28).modifier(Chip())
                 }
-                .buttonStyle(.plain).help(settings ? "Скрыть настройки" : "Настройки")
+                .buttonStyle(.plain).help(settings ? t("Скрыть настройки", "Hide settings") : t("Настройки", "Settings"))
             }
             .padding(.bottom, 14)
             Divider()
@@ -699,20 +739,20 @@ struct Panel: View {
                         .frame(width: 7, height: 7).frame(width: 10)
                     Text(e.name).font(.system(size: 13))
                     Spacer()
-                    StatusPill(text: off ? "выключена" : unruled ? "не работает" : !up ? "не запущен" : g.freezing ? "на паузе" : past ? "мимо VPN" : "работает") {
+                    StatusPill(text: off ? t("выключена", "off") : unruled ? t("не работает", "not working") : !up ? t("не запущен", "not running") : g.freezing ? t("на паузе", "frozen") : past ? t("мимо VPN", "outside VPN") : t("работает", "running")) {
                         if let service, unruled, !off {
                             gate.setRules(true, app: service) // asks for the admin password
                         } else if let i = g.entries.firstIndex(where: { $0.id == e.id }) {
                             g.entries[i].off = !off
                         }
                     }
-                    .help(off ? "Включить защиту для этой программы" : unruled ? "Серверы этой программы ещё не закрыты воротами VPN. Нажмите и введите пароль администратора." : "Выключить защиту для этой программы")
+                    .help(off ? t("Включить защиту для этой программы", "Switch protection on for this app") : unruled ? t("Серверы этой программы ещё не закрыты воротами VPN. Нажмите и введите пароль администратора.", "This app's servers are not behind the VPN gate yet. Click and enter the admin password.") : t("Выключить защиту для этой программы", "Switch protection off for this app"))
                     RemoveButton {
                         let drop = { g.entries.removeAll { $0.id == e.id } }
                         // The gate's rule leaves with the entry; if the password is refused, both stay.
                         if let service, gate.ruled.contains(service) { gate.setRules(false, app: service) { if $0 { drop() } } } else { drop() }
                     }
-                    .help("Убрать из списка")
+                    .help(t("Убрать из списка", "Remove from the list"))
                 }
                 .padding(.vertical, 9)
                 Divider()
@@ -720,10 +760,27 @@ struct Panel: View {
             // Behind the gear: the settings.
             if settings {
                 HStack(spacing: 8) {
-                    Text("Запускать при входе").font(.system(size: 13))
+                    Text(t("Запускать при входе", "Launch at login")).font(.system(size: 13))
                     Spacer()
-                    Toggle("Запускать при входе", isOn: Binding(get: { catalog.login }, set: { catalog.setLogin($0) }))
-                        .labelsHidden().toggleStyle(.switch).controlSize(.small).tint(.green)
+                    Toggle(t("Запускать при входе", "Launch at login"), isOn: Binding(get: { catalog.login }, set: { catalog.setLogin($0) }))
+                        .labelsHidden().toggleStyle(Switch())
+                }
+                .padding(.vertical, 8)
+                Divider()
+                HStack(spacing: 8) {
+                    Text(t("Язык", "Language")).font(.system(size: 13))
+                    Spacer()
+                    // Two plain chips, not a system control: they look the same in both themes and in an inactive window.
+                    HStack(spacing: 4) {
+                        ForEach([("ru", "Русский"), ("en", "English")], id: \.0) { code, name in
+                            Button { lang.choose(code) } label: {
+                                Text(name).font(.system(size: 11, weight: .medium)).padding(.horizontal, 8).padding(.vertical, 3)
+                                    .foregroundStyle(lang.code == code ? HierarchicalShapeStyle.primary : .tertiary)
+                                    .modifier(Chip(rest: lang.code == code ? 0.1 : 0, outline: lang.code == code ? 0.2 : 0.1))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
                 }
                 .padding(.vertical, 8)
                 Divider()
@@ -737,7 +794,7 @@ struct Panel: View {
             VStack(spacing: 0) {
                 HStack(spacing: 6) {
                     Image(systemName: "magnifyingglass").font(.system(size: 11)).foregroundStyle(.secondary).frame(width: 10)
-                    TextField("Поиск программы", text: $catalog.query).textFieldStyle(.plain).font(.system(size: 13)).focused($searching)
+                    TextField(t("Поиск программы", "Search apps"), text: $catalog.query).textFieldStyle(.plain).font(.system(size: 13)).focused($searching)
                 }
                 .padding(.vertical, 9).padding(edge)
                 Divider().padding(edge)
@@ -763,7 +820,7 @@ struct Panel: View {
                 .frame(height: 232)
                 .overlay {
                     if shown.isEmpty {
-                        Text(catalog.apps.isEmpty ? "Загружаю список" : "Ничего не найдено").font(.system(size: 12)).foregroundStyle(.secondary)
+                        Text(catalog.apps.isEmpty ? t("Загружаю список", "Loading the list") : t("Ничего не найдено", "Nothing found")).font(.system(size: 12)).foregroundStyle(.secondary)
                     }
                 }
                 .padding(.vertical, 6)
@@ -781,7 +838,7 @@ struct Panel: View {
                 } label: {
                     HStack(spacing: 4) { // tighter than a Label, which leaves the text far from the icon
                         Image(systemName: catalog.picking ? "xmark" : "plus").font(.system(size: 10, weight: .medium))
-                        Text(catalog.picking ? "Отмена" : "Добавить")
+                        Text(catalog.picking ? t("Отмена", "Cancel") : t("Добавить", "Add"))
                     }
                     .font(.system(size: 12, weight: .medium))
                     .fixedSize().padding(.horizontal, 10).padding(.vertical, 5)
@@ -801,19 +858,19 @@ struct Panel: View {
     }
 
     var title: String {
-        if !g.enabled { return "Защита на паузе" }
+        if !g.enabled { return t("Защита на паузе", "Protection paused") }
         switch g.protected {
-        case nil: return "Проверяю"
-        case true?: return "Защищено"
-        case false?: return "Заморожено"
+        case nil: return t("Проверяю", "Checking")
+        case true?: return t("Защищено", "Protected")
+        case false?: return t("Заморожено", "Frozen")
         }
     }
 
     var subtitle: String {
         switch g.protected {
-        case nil: return "Спрашиваю WARP"
-        case true?: return "WARP подключён"
-        case false?: return g.freezing ? "WARP отключён, " : "WARP отключён, программы работают"
+        case nil: return t("Спрашиваю WARP", "Asking WARP")
+        case true?: return t("WARP подключён", "WARP connected")
+        case false?: return g.freezing ? t("WARP отключён, ", "WARP disconnected, ") : t("WARP отключён, программы работают", "WARP disconnected, apps are running")
         }
     }
 
