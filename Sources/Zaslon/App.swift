@@ -114,6 +114,16 @@ func relaunchSoon() {
         if let look = env["LOOK"] { window.appearance = NSAppearance(named: look == "light" ? .aqua : .darkAqua) }
         if env["DROP"] != nil { g.update(false) }
         if env["OFF"] != nil { g.enabled = false }
+        if env["LOG"] != nil { // the journal with a fixed evening of outages, in memory only
+            let day = Calendar.current.startOfDay(for: Date())
+            func outage(_ from: Double, _ to: Double, _ frozen: [String], _ refused: Int) -> Outage {
+                Outage(start: day + from, end: day + to, frozen: frozen, refused: refused)
+            }
+            Journal.shared.outages = [
+                outage(71378, 71406, ["Claude", "ChatGPT"], 3), outage(69363, 69391, ["Claude", "ChatGPT"], 5),
+                outage(68594, 68757, ["ChatGPT"], 0), outage(68481, 68497, ["ChatGPT"], 0),
+            ]
+        }
         if env["TAP"] != nil { // switch off, then on, as two clicks on the shield would
             after(2.0) { withAnimation(.snappy(duration: 0.3)) { g.enabled = false } }
             after(2.6) { withAnimation(.snappy(duration: 0.3)) { g.enabled = true } }
@@ -700,6 +710,7 @@ struct Panel: View {
     @ObservedObject var gate = Gate.shared
     @ObservedObject var lang = Lang.shared // every string below is read again when the language changes
     @State private var settings = ProcessInfo.processInfo.environment["GEAR"] != nil // GEAR=1: open in the test window
+    @State private var journal = ProcessInfo.processInfo.environment["LOG"] != nil // LOG=1: open in the test window
     @FocusState private var searching: Bool
 
     init(g: Guard, catalog: Catalog = .shared) {
@@ -708,6 +719,14 @@ struct Panel: View {
     }
 
     var body: some View {
+        Group {
+            if journal { JournalView(journal: .shared) { journal = false } } else { main }
+        }
+        .padding(16)
+        .frame(width: 320)
+    }
+
+    @ViewBuilder var main: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 10) {
                 ShieldButton(g: g).help(g.enabled ? t("Выключить защиту", "Switch protection off") : t("Включить защиту", "Switch protection on"))
@@ -720,6 +739,11 @@ struct Panel: View {
                     .font(.system(size: 12)).foregroundStyle(.secondary)
                 }
                 Spacer()
+                Button { journal = true } label: {
+                    Image(systemName: "clock").font(.system(size: 14)).foregroundStyle(.secondary)
+                        .frame(width: 28, height: 28).modifier(Chip())
+                }
+                .buttonStyle(.plain).help(t("Журнал обрывов", "Outage journal")).padding(.trailing, -8)
                 Button { settings.toggle() } label: {
                     Image(systemName: settings ? "gearshape.fill" : "gearshape").font(.system(size: 14))
                         .foregroundStyle(settings ? HierarchicalShapeStyle.primary : .secondary)
@@ -857,8 +881,6 @@ struct Panel: View {
             .buttonStyle(.plain).font(.system(size: 12)).foregroundStyle(.secondary)
             .padding(.top, 12)
         }
-        .padding(16)
-        .frame(width: 320)
     }
 
     var title: String {

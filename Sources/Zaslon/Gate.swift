@@ -91,7 +91,10 @@ final class Gate: ObservableObject {
             // Only the listed services: this is not a forwarder to anywhere.
             guard let name = serverName(hello), Self.covers(name) else { return client.cancel() }
             self.tunnel.open(name, 443) { upstream in
-                guard let upstream else { return client.cancel() }
+                guard let upstream else {
+                    DispatchQueue.main.async { Journal.shared.refuse() }
+                    return client.cancel()
+                }
                 upstream.send(content: Data(hello), completion: .contentProcessed { _ in })
                 self.tunnel.pipe(client, upstream)
                 self.tunnel.pipe(upstream, client)

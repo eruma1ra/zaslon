@@ -115,6 +115,7 @@ Every state, in the light and the dark theme.
 | **Protection switched off** | <img src="docs/paused-light.png" width="330" alt="Paused, light"> | <img src="docs/paused-dark.png" width="330" alt="Paused, dark"> |
 | **Settings** | <img src="docs/settings-light.png" width="330" alt="Settings, light"> | <img src="docs/settings-dark.png" width="330" alt="Settings, dark"> |
 | **Adding an app** | <img src="docs/picker-light.png" width="330" alt="Adding an app, light"> | <img src="docs/picker-dark.png" width="330" alt="Adding an app, dark"> |
+| **Journal** | <img src="docs/journal-light.png" width="330" alt="Journal, light"> | <img src="docs/journal-dark.png" width="330" alt="Journal, dark"> |
 
 The header says what is going on:
 
@@ -142,8 +143,17 @@ Controls:
 - **Status button**: switches protection for that one app.
 - **×**: removes the app from the list. For ChatGPT and Claude this also removes the gate rule and asks for the password again.
 - **+ Add**: add an app from a searchable list of everything installed. Adding ChatGPT or Claude asks for the admin password; if you refuse, the app is not added.
+- **Clock**: the journal of outages (below).
 - **Gear**: settings. **Launch at login**, and **Language**: English or Russian. Zaslon starts in the system's language.
 - **Quit**.
+
+## The journal
+
+Zaslon writes down every outage it sees: when the VPN went and came back, how long that was, which apps on the list it froze, and how many connections the gate refused because there was no tunnel. The clock button opens the latest six; **Copy** puts the whole journal on the clipboard as text.
+
+An outage is counted from the moment Zaslon stops the apps to the moment WARP reports "Connected" again. That is usually longer than the time the tunnel was really gone: after a wake WARP is back on its tunnel in about a second, but keeps saying "Connecting" while it runs its own checks, and Zaslon waits for the clear answer.
+
+The journal holds the last 50 outages in `~/Library/Application Support/Zaslon/journal.json`.
 
 ## Requirements
 
@@ -218,7 +228,7 @@ Everything runs from the binary inside the bundle, `Zaslon.app/Contents/MacOS/Za
 | `--drill <seconds> <app or name…>` | A fire drill without touching the VPN: freezes the given programs through the real code path, then thaws them. |
 | `--gate <port> <dns port> [interface]` | Runs only the gate on spare ports. |
 | `--proxy <port> [interface]` | Runs only the tunnel proxy. |
-| `--window`, `--picker` | Shows the panel in a normal window. With `SHOT=<file.png>` it saves a picture and quits; `LOOK=light\|dark`, `UI=en\|ru`, `DROP=1`, `OFF=1` and `GEAR=1` choose the state. |
+| `--window`, `--picker` | Shows the panel in a normal window. With `SHOT=<file.png>` it saves a picture and quits; `LOOK=light\|dark`, `UI=en\|ru`, `DROP=1`, `OFF=1`, `GEAR=1` and `LOG=1` choose the state. |
 
 ## What was measured
 
@@ -245,6 +255,7 @@ Everything runs from the binary inside the bundle, `Zaslon.app/Contents/MacOS/Za
 | `Sources/Zaslon/Guard.swift` | The freeze: process scan, process trees, WARP check, tripwire, self-test. |
 | `Sources/Zaslon/Gate.swift` | The gate: DNS answerer, forwarder, the `/etc/resolver` rule, the connection reader. |
 | `Sources/Zaslon/Proxy.swift` | Tunnel-pinned connections, the real-address lookup, the `CONNECT` proxy. |
+| `Sources/Zaslon/Journal.swift` | The journal of outages and its view. |
 | `Sources/Zaslon/App.swift` | The menu bar window, autostart, test windows. |
 | `build.sh`, `icon.swift` | Builds the app bundle; draws the icon. |
 

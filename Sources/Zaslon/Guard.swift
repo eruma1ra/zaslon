@@ -222,6 +222,9 @@ final class Guard: ObservableObject {
 
     func update(_ ok: Bool, _ procs: [Proc]? = nil) {
         if protected != ok {
+            // The journal: an outage opens when a connection that was there is lost, and closes when it is back.
+            if live, protected == true { Journal.shared.mark(connected: false, off: !enabled) }
+            if live, protected == false { Journal.shared.mark(connected: true) }
             protected = ok
             since = Date()
         }
@@ -252,6 +255,7 @@ final class Guard: ObservableObject {
         for pid in frozen.subtracting(target) { signal(pid, SIGCONT) }
         frozen = target
         if running != up { running = up }
+        if live, protected == false, freezing { Journal.shared.froze(entries.filter { up.contains($0.id) && $0.off != true }.map(\.name)) }
     }
 
     func thawAll() {
@@ -386,6 +390,25 @@ func selftest() {
     precondition(connections(getpid()).contains { $0.local == "127.0.0.1" && $0.remote == "127.0.0.1" }, "the reader sees our own connection with both addresses right")
     precondition(!leavesOutside(getpid(), tunnelAddresses()), "this process has no connection outside the tunnel")
     close(client); close(server)
+    // The journal: an outage opens once, collects what was frozen and refused, closes, and survives a restart.
+    let (j, t0) = (Journal(file: nil), Date(timeIntervalSince1970: 1_800_000_000))
+    j.refuse(); j.froze(["X"]); j.mark(connected: true, at: t0)
+    precondition(j.outages.isEmpty, "nothing is written while no outage is open")
+    j.mark(connected: false, at: t0); j.mark(connected: false, at: t0 + 5)
+    j.froze(["Claude"]); j.froze(["ChatGPT", "Claude"]); j.refuse(); j.refuse()
+    j.mark(connected: true, at: t0 + 163)
+    precondition(j.outages.count == 1 && j.outages[0].frozen == ["Claude", "ChatGPT"] && j.outages[0].refused == 2 && j.outages[0].end == t0 + 163, "one outage with its facts")
+    Lang.shared.code = "en"
+    precondition(Journal.lasted(163) == "2 min 43 s" && Journal.lasted(28) == "28 s" && Journal.lasted(3900) == "1 h 5 min", "lengths read naturally")
+    precondition(Journal.connections(1) == "1 connection" && Journal.connections(3) == "3 connections")
+    Lang.shared.code = "ru"
+    precondition(["1 соединение", "3 соединения", "11 соединений", "21 соединение", "25 соединений"] == [1, 3, 11, 21, 25].map(Journal.connections), "Russian counts take the right form")
+    precondition(Journal.facts(j.outages[0]) == ["Заморожено: Claude, ChatGPT", "Ворота отказали: 2 соединения"])
+    let journalFile = NSTemporaryDirectory() + "zaslon-journal-test.json"
+    try? FileManager.default.removeItem(atPath: journalFile)
+    Journal(file: journalFile).mark(connected: false, at: t0)
+    precondition(Journal(file: journalFile).outages.map(\.end) == [t0], "an outage left open by a quit is read back closed, with no length")
+    try? FileManager.default.removeItem(atPath: journalFile)
     // The very lines that will run with admin rights, here without them and in a scratch folder.
     let folder = NSTemporaryDirectory() + "zaslon-rule-test"
     try? FileManager.default.removeItem(atPath: folder)
