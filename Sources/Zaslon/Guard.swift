@@ -150,6 +150,7 @@ final class Guard: ObservableObject {
     /// The tunnels that existed at the last "connected" answer. Written on the main thread, read by the tripwire.
     private let known = OSAllocatedUnfairLock(initialState: Set<String>())
     private var wire: DispatchSourceTimer?
+    private var noted: Bool? // the connection state the journal has seen last
 
     /// Unknown counts as unprotected: the list is frozen from the first moment and thawed by the first "connected".
     var freezing: Bool { protected != true && enabled }
@@ -221,17 +222,11 @@ final class Guard: ObservableObject {
     }
 
     func update(_ ok: Bool, _ procs: [Proc]? = nil) {
-        let before = protected
         if protected != ok {
             protected = ok
             since = Date()
         }
-        apply(procs) // freeze first: nothing may stand between a drop and the stop signals
-        guard live else { return }
-        // The journal: an outage opens when a connection that was there is lost, and closes when it is back.
-        if before == true, !ok { Journal.shared.mark(connected: false, off: !enabled) }
-        if before == false, ok { Journal.shared.mark(connected: true) }
-        if !ok, freezing { Journal.shared.froze(entries.filter { running.contains($0.id) && $0.off != true }.map(\.name)) }
+        apply(procs)
     }
 
     func apply(_ scanned: [Proc]? = nil) {
@@ -258,6 +253,13 @@ final class Guard: ObservableObject {
         for pid in frozen.subtracting(target) { signal(pid, SIGCONT) }
         frozen = target
         if running != up { running = up }
+        // The journal is fed here and nowhere else: every freeze is decided in this function, whatever led to it
+        // (a drop, the shield, a change to the list), and the stop signals above have already been sent.
+        guard live else { return }
+        if noted == true, protected == false { Journal.shared.mark(connected: false, off: !enabled) }
+        if noted == false, protected == true { Journal.shared.mark(connected: true) }
+        noted = protected
+        if protected == false, freezing { Journal.shared.froze(entries.filter { up.contains($0.id) && $0.off != true }.map(\.name)) }
     }
 
     func thawAll() {
@@ -409,9 +411,11 @@ func selftest() {
     let journalFile = NSTemporaryDirectory() + "zaslon-journal-test.json"
     try? FileManager.default.removeItem(atPath: journalFile)
     let kept = Journal(file: journalFile)
-    kept.outages = [Outage(start: t0, frozen: ["Claude"], off: true)]
+    kept.outages = [Outage(start: t0, frozen: ["Claude"], off: true), Outage(start: t0 - 60, end: t0 - 59.6)]
     kept.store(wait: true)
-    precondition(Journal(file: journalFile).outages.map(\.end) == [t0], "an outage left open by a quit is read back closed, with no length")
+    let read = Journal(file: journalFile).outages
+    precondition(read.map(\.cut) == [true, nil] && abs(read[1].end!.timeIntervalSince(t0 - 59.6)) < 0.001, "an outage left open by a quit is read back as cut short; one under a second keeps its length")
+    precondition(Journal.span(read[0]).hasSuffix("– ?") && !Journal.span(read[1]).hasSuffix("?"))
     precondition(Journal.facts(kept.outages[0]) == ["Заморожено: Claude"] && Journal.facts(Outage(start: t0, off: true)) == ["Защита была выключена"], "what was frozen is shown even if the outage began with protection off")
     try? FileManager.default.removeItem(atPath: journalFile)
     // The very lines that will run with admin rights, here without them and in a scratch folder.

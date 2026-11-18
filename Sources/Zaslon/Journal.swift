@@ -8,6 +8,7 @@ struct Outage: Codable, Identifiable, Equatable {
     var frozen: [String] = [] // names of the list entries that were stopped
     var refused = 0 // connections the gate turned away for lack of a tunnel
     var off = false // protection was switched off, so nothing was stopped
+    var cut: Bool? // true: Zaslon stopped before the VPN came back, so when the outage ended is not known
 }
 
 /// The record of outages: when the VPN was gone, what was frozen, how many connections the gate refused.
@@ -24,13 +25,17 @@ final class Journal: ObservableObject {
     init(file: String?) {
         self.file = file
         guard let file, let saved = FileManager.default.contents(atPath: file).flatMap({ try? Self.coder.1.decode([Outage].self, from: $0) }) else { return }
-        // An outage left open by a crash or a quit: when it ended is not known, so it gets no length.
-        outages = saved.map { o in var o = o; o.end = o.end ?? o.start; return o }
+        // An outage left open by a crash or a quit: when it ended is not known. It is closed and marked as cut short.
+        outages = saved.map { o in
+            var o = o
+            if o.end == nil { (o.end, o.cut) = (o.start, true) }
+            return o
+        }
     }
 
     private static let coder: (JSONEncoder, JSONDecoder) = {
         let (to, from) = (JSONEncoder(), JSONDecoder())
-        (to.dateEncodingStrategy, from.dateDecodingStrategy) = (.iso8601, .iso8601)
+        (to.dateEncodingStrategy, from.dateDecodingStrategy) = (.secondsSince1970, .secondsSince1970) // keeps fractions of a second
         return (to, from)
     }()
 
@@ -103,7 +108,7 @@ final class Journal: ObservableObject {
         clock.dateFormat = Calendar.current.isDate(o.start, inSameDayAs: now) ? "HH:mm:ss" : "d MMM HH:mm:ss"
         let end = DateFormatter()
         end.dateFormat = "HH:mm:ss"
-        return clock.string(from: o.start) + " – " + (o.end.map(end.string) ?? "…")
+        return clock.string(from: o.start) + " – " + (o.cut == true ? "?" : o.end.map(end.string) ?? "…")
     }
 
     /// "3 connections"; Russian has three forms.
@@ -125,7 +130,7 @@ final class Journal: ObservableObject {
     /// The whole journal as plain text, for the Copy button.
     var text: String {
         outages.map { o in
-            let length = o.end.map { $0 == o.start ? "" : "  " + Self.lasted(Int($0.timeIntervalSince(o.start).rounded())) } ?? ""
+            let length = o.end.map { o.cut == true ? "" : "  " + Self.lasted(Int($0.timeIntervalSince(o.start).rounded())) } ?? ""
             return ([Self.span(o) + length] + Self.facts(o).map { "  " + $0 }).joined(separator: "\n")
         }.joined(separator: "\n")
     }
@@ -160,7 +165,7 @@ struct JournalView: View {
                     HStack {
                         Text(Journal.span(o)).font(.system(size: 13, weight: .medium)).monospacedDigit()
                         Spacer()
-                        if let end = o.end, end != o.start {
+                        if let end = o.end, o.cut != true {
                             Text(Journal.lasted(Int(end.timeIntervalSince(o.start).rounded()))).font(.system(size: 12)).foregroundStyle(.secondary)
                         } else if o.end == nil {
                             Text(t("идёт", "now")).font(.system(size: 12)).foregroundStyle(.secondary)
