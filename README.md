@@ -12,7 +12,7 @@ If the VPN is not there, ChatGPT and Claude cannot reach their servers at all, a
 
 *Zaslon* (заслон) is Russian for "barrier". It is a small menu bar app, written in Swift and SwiftUI, with no dependencies. It was built for a setup where the VPN must always be on and nothing an AI app sends may leave the Mac outside of it.
 
-> Zaslon works with **Cloudflare WARP** only. The interface is in **Russian**; this page translates every label.
+> Zaslon works with **Cloudflare WARP** only. The interface comes in English and Russian.
 
 ## What it does
 
@@ -91,41 +91,44 @@ Not every program obeys proxy settings. In the tests, the ChatGPT app's computer
 
 ## The window
 
-<p align="center">
-  <img src="docs/frozen-dark.png" width="380" alt="The VPN is down: apps are frozen">
-  <img src="docs/paused-light.png" width="380" alt="Protection switched off">
-</p>
-<p align="center">
-  <img src="docs/picker-dark.png" width="380" alt="Adding an app">
-  <img src="docs/settings-light.png" width="380" alt="Settings">
-</p>
+Every state, in the light and the dark theme.
 
-| On screen | Meaning |
+| | Light | Dark |
+|---|---|---|
+| **Protected** | <img src="docs/main-light.png" width="330" alt="Protected, light"> | <img src="docs/main-dark.png" width="330" alt="Protected, dark"> |
+| **The VPN is down** | <img src="docs/frozen-light.png" width="330" alt="Frozen, light"> | <img src="docs/frozen-dark.png" width="330" alt="Frozen, dark"> |
+| **Protection switched off** | <img src="docs/paused-light.png" width="330" alt="Paused, light"> | <img src="docs/paused-dark.png" width="330" alt="Paused, dark"> |
+| **Settings** | <img src="docs/settings-light.png" width="330" alt="Settings, light"> | <img src="docs/settings-dark.png" width="330" alt="Settings, dark"> |
+| **Adding an app** | <img src="docs/picker-light.png" width="330" alt="Adding an app, light"> | <img src="docs/picker-dark.png" width="330" alt="Adding an app, dark"> |
+
+The header says what is going on:
+
+| Header | Meaning |
 |---|---|
-| **Защищено** · WARP подключён | Protected. WARP is connected. |
-| **Заморожено** · WARP отключён | Frozen. WARP is down; the timer shows for how long. |
-| **Защита на паузе** | You switched protection off with the shield button. |
-| **Проверяю** | Asking WARP. The list is frozen until it answers. |
+| **Protected** · WARP connected | All is well. |
+| **Frozen** · WARP disconnected | The VPN is down and the apps are stopped; the timer shows for how long. |
+| **Protection paused** | You switched protection off with the shield button. |
+| **Checking** | Asking WARP. The list stays frozen until it answers. |
 
 Each app has one status. It is a measured fact, not a guess from settings: every three seconds Zaslon reads the app's open connections from the kernel.
 
 | Dot | Status | Meaning |
 |---|---|---|
-| green | **работает** | Running. Every connection goes through the VPN. |
-| yellow | **мимо VPN** | ChatGPT or Claude holds a connection to the internet that does not start from the tunnel. |
-| yellow | **на паузе** | Frozen: the VPN is down. |
-| red | **не работает** | ChatGPT or Claude has no gate rule yet. Click the status and enter the admin password. |
-| red | **выключена** | You switched protection off for this app. Click to switch it back on. |
-| hollow | **не запущен** | The app is not running. |
+| green | **running** | Every connection goes through the VPN. |
+| yellow | **outside VPN** | ChatGPT or Claude holds a connection to the internet that does not start from the tunnel. |
+| yellow | **frozen** | Stopped: the VPN is down. |
+| red | **not working** | ChatGPT or Claude has no gate rule yet. Click the status and enter the admin password. |
+| red | **off** | You switched protection off for this app. Click to switch it back on. |
+| hollow | **not running** | The app is not open. |
 
 Controls:
 
 - **Shield button**: switches all protection on and off.
 - **Status button**: switches protection for that one app.
 - **×**: removes the app from the list. For ChatGPT and Claude this also removes the gate rule and asks for the password again.
-- **+ Добавить**: add an app from a searchable list of everything installed. Adding ChatGPT or Claude asks for the admin password; if you refuse, the app is not added.
-- **Gear**: settings. **Запускать при входе** = launch at login.
-- **Выйти**: quit.
+- **+ Add**: add an app from a searchable list of everything installed. Adding ChatGPT or Claude asks for the admin password; if you refuse, the app is not added.
+- **Gear**: settings. **Launch at login**, and **Language**: English or Russian. Zaslon starts in the system's language.
+- **Quit**.
 
 ## Requirements
 
@@ -172,7 +175,7 @@ Everything runs from the binary inside the bundle, `build/Zaslon.app/Contents/Ma
 | `--drill <seconds> <app or name…>` | A fire drill without touching the VPN: freezes the given programs through the real code path, then thaws them. |
 | `--gate <port> <dns port> [interface]` | Runs only the gate on spare ports. |
 | `--proxy <port> [interface]` | Runs only the tunnel proxy. |
-| `--window`, `--picker` | Shows the panel in a normal window. With `SHOT=<file.png>` it saves a picture and quits; `LOOK=light\|dark`, `DROP=1`, `OFF=1` and `GEAR=1` choose the state. |
+| `--window`, `--picker` | Shows the panel in a normal window. With `SHOT=<file.png>` it saves a picture and quits; `LOOK=light\|dark`, `UI=en\|ru`, `DROP=1`, `OFF=1` and `GEAR=1` choose the state. |
 
 ## What was measured
 
@@ -190,7 +193,6 @@ Everything runs from the binary inside the bundle, `build/Zaslon.app/Contents/Ma
 - The freeze has a window of up to 50 ms, and the kernel keeps receiving on open connections.
 - The gate knows two services, at fixed paths: `/Applications/ChatGPT.app` and `/Applications/Claude.app`. The list is in `Gate.swift`.
 - One address per name, IPv4 only. The DNS answerer gives no IPv6 answer, so programs use IPv4.
-- The interface is in Russian.
 - A real per-app firewall is out of reach without a Network Extension.
 
 ## Source
