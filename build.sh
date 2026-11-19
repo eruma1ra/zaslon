@@ -3,7 +3,8 @@
 # agent until it is registered again: open the app once by hand after every build and it repairs that itself.
 # Check the logic with: build/Zaslon.app/Contents/MacOS/Zaslon --selftest
 #   ./build.sh       the app for this Mac
-#   ./build.sh dmg   the app for both chip families, packed as build/Zaslon-<version>.dmg for a release
+#   ./build.sh dmg   the app for both chip families, packed as build/Zaslon-<version>.dmg, plus build/update.json:
+#                    attach both to the release
 # SWIFT_BUILD_FLAGS is passed on to `swift build` (Homebrew needs --disable-sandbox).
 set -e
 cd "$(dirname "$0")"
@@ -61,7 +62,7 @@ if [ "$1" = dmg ]; then
     hdiutil create -quiet -volname Zaslon -srcfolder build/dmg -ov -format UDZO build/Zaslon-1.1.0.dmg
     rm -rf build/dmg
     echo "built build/Zaslon-1.1.0.dmg"
-    # What the app's own updater reads: attach it to the release next to the disk image.
+    # What the app's daily check reads. A release must carry both files: the disk image and this update.json.
     printf '{"version": "1.1.0", "image": "https://github.com/eruma1ra/zaslon/releases/download/v1.1.0/Zaslon-1.1.0.dmg", "sha256": "%s"}\n' "$(shasum -a 256 build/Zaslon-1.1.0.dmg | cut -d' ' -f1)" > build/update.json
     echo "built build/update.json"
 fi

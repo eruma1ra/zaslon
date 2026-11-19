@@ -418,16 +418,10 @@ func selftest() {
     precondition(Journal.span(read[0]).hasSuffix("– ?") && !Journal.span(read[1]).hasSuffix("?"))
     precondition(Journal.facts(kept.outages[0]) == ["Заморожено: Claude"] && Journal.facts(Outage(start: t0, off: true)) == ["Защита была выключена"], "what was frozen is shown even if the outage began with protection off")
     try? FileManager.default.removeItem(atPath: journalFile)
-    // Updates: versions compare as numbers, and a release counts only with a disk image and its SHA-256.
+    // Updates: versions compare as numbers, and a release description yields a plain version or nothing.
     precondition(Updater.newer("1.10.0", than: "1.9.3") && Updater.newer("1.2", than: "1.1.9") && !Updater.newer("1.2.0", than: "1.2") && !Updater.newer("1.1.0", than: "1.2.0"), "versions compare number by number")
-    let sum = String(repeating: "ab", count: 32)
-    let web = URL(string: "https://github.com/eruma1ra/zaslon/releases/latest/download/update.json")!
-    let described = { (image: String, sha: String) in Data(#"{"version":"1.2.0","image":"\#(image)","sha256":"\#(sha)"}"#.utf8) }
-    let good = try? Updater.latest(described("https://github.com/eruma1ra/zaslon/releases/download/v1.2.0/Zaslon-1.2.0.dmg", sum), from: web)
-    precondition(good == Release(version: "1.2.0", image: URL(string: "https://github.com/eruma1ra/zaslon/releases/download/v1.2.0/Zaslon-1.2.0.dmg")!, sha256: sum), "a release is read from its description")
-    precondition((try? Updater.latest(described("https://example.com/Zaslon.dmg", sum), from: web)) == nil, "an image on another host is refused")
-    precondition((try? Updater.latest(described("http://github.com/Zaslon.dmg", sum), from: web)) == nil && (try? Updater.latest(described("https://github.com/z.dmg", "ab12"), from: web)) == nil
-        && (try? Updater.latest(Data("{}".utf8), from: web)) == nil, "no https, no full SHA-256, or no description: nothing to install")
+    precondition((try? Updater.described(Data(#"{"version": "1.2.0", "image": "x"}"#.utf8))) == "1.2.0", "the version is read from a release description")
+    precondition((try? Updater.described(Data(#"{"version": "1.2.0; rm"}"#.utf8))) == nil && (try? Updater.described(Data("{}".utf8))) == nil && (try? Updater.described(Data("<html>".utf8))) == nil, "anything but digits and dots is no version")
     // The very lines that will run with admin rights, here without them and in a scratch folder.
     let folder = NSTemporaryDirectory() + "zaslon-rule-test"
     try? FileManager.default.removeItem(atPath: folder)

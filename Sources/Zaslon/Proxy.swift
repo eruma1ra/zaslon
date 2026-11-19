@@ -1,5 +1,6 @@
 import Foundation
 import Network
+import os
 
 /// The only way out for the proxy and the gate: TCP connections pinned to the VPN tunnel interface.
 ///
@@ -168,6 +169,9 @@ final class TunnelProxy: ObservableObject {
     static var url: String { "http://127.0.0.1:\(port)" }
 
     @Published var listening = false
+    /// The same fact for any thread: Zaslon's own requests go through the proxy only while it really listens.
+    var ready: Bool { state.withLock { $0 } }
+    private let state = OSAllocatedUnfairLock(initialState: false)
 
     private let tunnel = Tunnel.shared
     private var listener: NWListener?
@@ -190,7 +194,9 @@ final class TunnelProxy: ObservableObject {
                 again()
             default: break
             }
-            DispatchQueue.main.async { self?.listening = up }
+            let listens = up
+            self?.state.withLock { $0 = listens }
+            DispatchQueue.main.async { self?.listening = listens }
         }
         listener.newConnectionHandler = { [weak self] client in self?.accept(client) }
         listener.start(queue: tunnel.queue)

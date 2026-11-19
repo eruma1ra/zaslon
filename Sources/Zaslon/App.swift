@@ -23,14 +23,14 @@ enum Main {
             Gate.shared.start(port: port, dnsPort: dnsPort)
             dispatchMain()
         }
-        // --update <app> [feed]: bring that copy of the app up to the latest release, in the open (tests).
-        if let i = args.firstIndex(of: "--update"), i + 1 < args.count {
-            // Its own tunnel proxy on a spare port: the tray app may not be running, and the requests must be pinned
-            // to the VPN all the same. A moment for the listener to come up.
-            Updater.proxyPort = 47801
-            TunnelProxy.shared.start(port: Updater.proxyPort)
-            usleep(300_000)
-            exit(Updater.once(bundle: URL(fileURLWithPath: args[i + 1]), feed: i + 2 < args.count ? args[i + 2] : Updater.feed))
+        // --latest: ask for the latest version exactly as the daily check does, through a tunnel proxy of its own
+        // on a spare port (the tray app holds the usual one), and print it.
+        if args.contains("--latest") {
+            TunnelProxy.shared.start(port: 47801)
+            for _ in 0..<30 where !TunnelProxy.shared.ready { usleep(100_000) }
+            let found = try? Updater.described(Updater.fetch(Updater.feed, port: 47801))
+            print("running \(Updater.version), latest \(found ?? "unknown"), newer: \(found.map { Updater.newer($0, than: Updater.version) } ?? false)")
+            exit(found == nil ? 1 : 0)
         }
         // --through <app>: start the app through the tunnel proxy, exactly as the button in the window does (tests).
         if let i = args.firstIndex(of: "--through"), i + 1 < args.count {
@@ -127,9 +127,9 @@ func relaunchSoon() {
         if let look = env["LOOK"] { window.appearance = NSAppearance(named: look == "light" ? .aqua : .darkAqua) }
         if env["DROP"] != nil { g.update(false) }
         if env["OFF"] != nil { g.enabled = false }
-        // The settings picture shows updates switched on and up to date, whatever this Mac's own setting is.
+        // The settings picture shows the check switched on and up to date, whatever this Mac's own setting is.
         if env["GEAR"] != nil { (Updater.shared.on, Updater.shared.latest) = (true, true) }
-        if let ready = env["READY"] { Updater.shared.step = .ready(ready) } // READY=1.2.0: a downloaded version waits
+        if let out = env["NEWER"] { Updater.shared.newer = out } // NEWER=1.2.0: a newer version is out
         if env["LOG"] != nil { // the journal with a fixed evening of outages, in memory only
             let day = Calendar.current.startOfDay(for: Date())
             func outage(_ from: Double, _ to: Double, _ frozen: [String], _ refused: Int) -> Outage {
@@ -242,13 +242,8 @@ func watchStalls() {
 final class Delegate: NSObject, NSApplicationDelegate {
     private var asked: DispatchSourceSignal?
 
-    /// Quit from the menu or at logout: the journal's last changes go to disk, and a downloaded version in place.
-    func applicationWillTerminate(_: Notification) {
-        Journal.shared.store(wait: true)
-        // Zaslon is closing anyway (Quit, logout, shutdown): the one moment a downloaded version can take the
-        // app's place without interrupting anything. The next start is simply the new version.
-        Updater.applyAtQuit()
-    }
+    /// Quit from the menu or at logout: the journal's last changes go to disk first.
+    func applicationWillTerminate(_: Notification) { Journal.shared.store(wait: true) }
 
     func applicationDidFinishLaunching(_: Notification) {
         // Asked to stop by a signal (a newer copy taking over, `kill`): the same, then leave with an error code, so
@@ -742,7 +737,7 @@ struct RemoveButton: View {
     }
 }
 
-/// The settings, shown in place of the list: autostart, updates, language.
+/// The settings, shown in place of the list: autostart, the check for updates, language.
 struct SettingsView: View {
     @ObservedObject var catalog: Catalog
     @ObservedObject var updater = Updater.shared
@@ -763,15 +758,20 @@ struct SettingsView: View {
             Divider()
             HStack(spacing: 8) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(t("Обновлять автоматически", "Update automatically")).font(.system(size: 13))
+                    Text(t("Проверять обновления", "Check for updates")).font(.system(size: 13))
                     Text(updater.status).font(.system(size: 12)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    // Zaslon only tells; installing is the user's step. Under Homebrew the line above names the command.
+                    if updater.newer != nil, !Updater.brewed {
+                        Button { NSWorkspace.shared.open(Updater.page) } label: {
+                            Text(t("Скачать", "Download")).font(.system(size: 11, weight: .medium))
+                                .padding(.horizontal, 8).padding(.vertical, 3).modifier(Chip(rest: 0.07, outline: 0.15))
+                        }
+                        .buttonStyle(.plain).padding(.top, 3)
+                    }
                 }
                 Spacer()
-                // Under Homebrew the formula owns the app: no switch, the line above says how to update.
-                if !Updater.brewed {
-                    Toggle(t("Обновлять автоматически", "Update automatically"), isOn: Binding(get: { updater.on }, set: { updater.choose($0) }))
-                        .labelsHidden().toggleStyle(Switch())
-                }
+                Toggle(t("Проверять обновления", "Check for updates"), isOn: Binding(get: { updater.on }, set: { updater.choose($0) }))
+                    .labelsHidden().toggleStyle(Switch())
             }
             .padding(.vertical, 9)
             Divider()

@@ -144,7 +144,7 @@ Controls:
 - **×**: removes the app from the list. For ChatGPT and Claude this also removes the gate rule and asks for the password again.
 - **+ Add**: add an app from a searchable list of everything installed. Adding ChatGPT or Claude asks for the admin password; if you refuse, the app is not added.
 - **Clock**: the journal of outages (below).
-- **Gear**: the settings, in place of the list. **Launch at login**, **Update automatically** (below), and **Language**: English or Russian. Zaslon starts in the system's language.
+- **Gear**: the settings, in place of the list. **Launch at login**, **Check for updates** (below), and **Language**: English or Russian. Zaslon starts in the system's language.
 - **Quit**.
 
 ## The journal
@@ -157,17 +157,11 @@ The journal holds the last 50 outages in `~/Library/Application Support/Zaslon/j
 
 ## Updates
 
-**Update automatically** in the settings is off until you switch it on. It works in two halves, and neither touches the watch over the VPN:
+**Check for updates** in the settings is off until you switch it on. With it on, Zaslon asks once a day whether a newer version is out, and says so under the switch with a **Download** button that opens the release page. Under Homebrew it names the command instead: `brew update && brew upgrade zaslon`.
 
-1. **While Zaslon runs** it asks once a day for the latest release. A newer one is downloaded, checked and set aside. Nothing else changes.
-2. **When Zaslon quits** (Quit, logout, shutdown) the version set aside takes the app's place. Zaslon is closing anyway, so nothing is interrupted, and the next start is simply the new version.
-
-Zaslon never restarts itself for an update: a restart is a few seconds without a watch, and no update is worth that. The line under the switch tells you when a version is waiting; to have it at once, quit Zaslon and open it again. Your list, the gate rules and the journal are kept.
-
-- **Nothing goes out while the VPN is down**, and Zaslon's own requests go through its tunnel proxy, so they cannot leave another way.
-- **What is checked.** Each release carries a small `update.json` with its version and the SHA-256 of its disk image. The image must have that SHA-256; the app inside must be Zaslon, be the announced version and have an intact signature. If any check fails, nothing is set aside and the installed app is not touched.
-- **What that means.** Zaslon has no Apple Developer ID, so the update is as trustworthy as this GitHub repository. Leave the switch off if you would rather read each release first.
-- **Homebrew installs have no switch**: the formula owns the app there. Use `brew update && brew upgrade zaslon`, then run `zaslon` once.
+- **Zaslon does not install updates by itself.** It has no Apple Developer ID, and replacing the app under its own feet either leaves seconds without a watch over the VPN or risks that the launch agent cannot start it at the next login. A kill switch that might not come back is worse than one that asks for a click.
+- **Nothing goes out while the VPN is down**, and the question goes through Zaslon's own tunnel proxy, so it cannot leave another way.
+- **What is asked**: one small file attached to each release, `update.json`, which holds the version number. Nothing about your Mac is sent.
 
 ## Requirements
 
@@ -242,7 +236,6 @@ Everything runs from the binary inside the bundle, `Zaslon.app/Contents/MacOS/Za
 | `--drill <seconds> <app or name…>` | A fire drill without touching the VPN: freezes the given programs through the real code path, then thaws them. |
 | `--gate <port> <dns port> [interface]` | Runs only the gate on spare ports. |
 | `--proxy <port> [interface]` | Runs only the tunnel proxy. |
-| `--update <app> [feed]` | Brings that copy of the app up to the latest release, printing each step. A feed is the URL of an `update.json`. |
 | `--window`, `--picker` | Shows the panel in a normal window. With `SHOT=<file.png>` it saves a picture and quits; `LOOK=light\|dark`, `UI=en\|ru`, `DROP=1`, `OFF=1`, `GEAR=1` and `LOG=1` choose the state. |
 
 ## What was measured
@@ -271,7 +264,7 @@ Everything runs from the binary inside the bundle, `Zaslon.app/Contents/MacOS/Za
 | `Sources/Zaslon/Gate.swift` | The gate: DNS answerer, forwarder, the `/etc/resolver` rule, the connection reader. |
 | `Sources/Zaslon/Proxy.swift` | Tunnel-pinned connections, the real-address lookup, the `CONNECT` proxy. |
 | `Sources/Zaslon/Journal.swift` | The journal of outages and its view. |
-| `Sources/Zaslon/Updater.swift` | Updates from the latest GitHub release. |
+| `Sources/Zaslon/Updater.swift` | The daily check for a newer release. |
 | `Sources/Zaslon/App.swift` | The menu bar window, autostart, test windows. |
 | `build.sh`, `icon.swift` | Builds the app bundle; draws the icon. |
 
