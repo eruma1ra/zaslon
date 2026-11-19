@@ -144,7 +144,7 @@ Controls:
 - **×**: removes the app from the list. For ChatGPT and Claude this also removes the gate rule and asks for the password again.
 - **+ Add**: add an app from a searchable list of everything installed. Adding ChatGPT or Claude asks for the admin password; if you refuse, the app is not added.
 - **Clock**: the journal of outages (below).
-- **Gear**: settings. **Launch at login**, and **Language**: English or Russian. Zaslon starts in the system's language.
+- **Gear**: the settings, in place of the list. **Launch at login**, **Update automatically** (below), and **Language**: English or Russian. Zaslon starts in the system's language.
 - **Quit**.
 
 ## The journal
@@ -154,6 +154,16 @@ Zaslon writes down every outage it sees: when the VPN went and came back, how lo
 An outage is counted from the moment Zaslon stops the apps to the moment WARP reports "Connected" again. That is usually longer than the time the tunnel was really gone: after a wake WARP is back on its tunnel in about a second, but keeps saying "Connecting" while it runs its own checks, and Zaslon waits for the clear answer.
 
 The journal holds the last 50 outages in `~/Library/Application Support/Zaslon/journal.json`.
+
+## Updates
+
+**Update automatically** in the settings is off until you switch it on. With it on, Zaslon asks GitHub once a day for the latest release. A newer one is downloaded, checked and put in place of the running app, and Zaslon starts again from it. Your list, the gate rules and the journal are kept.
+
+- **Nothing goes out while the VPN is down.** Zaslon waits and says so under the switch.
+- **The restart takes 2–3 seconds**, during which ChatGPT and Claude cannot connect. Nothing leaves outside the VPN, but a request in flight at that moment is cut.
+- **What is checked.** The disk image must have the SHA-256 that GitHub lists for it; the app inside must be Zaslon, be the announced version and have an intact signature. If any check fails, the installed app is not touched.
+- **What that means.** Zaslon has no Apple Developer ID, so the update is as trustworthy as this GitHub repository. Leave the switch off if you would rather read each release first.
+- **Homebrew installs have no switch**: the formula owns the app there. Use `brew update && brew upgrade zaslon`, then run `zaslon` once.
 
 ## Requirements
 
@@ -228,6 +238,7 @@ Everything runs from the binary inside the bundle, `Zaslon.app/Contents/MacOS/Za
 | `--drill <seconds> <app or name…>` | A fire drill without touching the VPN: freezes the given programs through the real code path, then thaws them. |
 | `--gate <port> <dns port> [interface]` | Runs only the gate on spare ports. |
 | `--proxy <port> [interface]` | Runs only the tunnel proxy. |
+| `--update <app> [feed]` | Brings that copy of the app up to the latest release, printing each step. A feed is a URL in the shape of GitHub's "latest release" answer. |
 | `--window`, `--picker` | Shows the panel in a normal window. With `SHOT=<file.png>` it saves a picture and quits; `LOOK=light\|dark`, `UI=en\|ru`, `DROP=1`, `OFF=1`, `GEAR=1` and `LOG=1` choose the state. |
 
 ## What was measured
@@ -256,6 +267,7 @@ Everything runs from the binary inside the bundle, `Zaslon.app/Contents/MacOS/Za
 | `Sources/Zaslon/Gate.swift` | The gate: DNS answerer, forwarder, the `/etc/resolver` rule, the connection reader. |
 | `Sources/Zaslon/Proxy.swift` | Tunnel-pinned connections, the real-address lookup, the `CONNECT` proxy. |
 | `Sources/Zaslon/Journal.swift` | The journal of outages and its view. |
+| `Sources/Zaslon/Updater.swift` | Updates from the latest GitHub release. |
 | `Sources/Zaslon/App.swift` | The menu bar window, autostart, test windows. |
 | `build.sh`, `icon.swift` | Builds the app bundle; draws the icon. |
 

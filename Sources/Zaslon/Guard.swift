@@ -418,6 +418,12 @@ func selftest() {
     precondition(Journal.span(read[0]).hasSuffix("– ?") && !Journal.span(read[1]).hasSuffix("?"))
     precondition(Journal.facts(kept.outages[0]) == ["Заморожено: Claude"] && Journal.facts(Outage(start: t0, off: true)) == ["Защита была выключена"], "what was frozen is shown even if the outage began with protection off")
     try? FileManager.default.removeItem(atPath: journalFile)
+    // Updates: versions compare as numbers, and a release counts only with a disk image and its SHA-256.
+    precondition(Updater.newer("1.10.0", than: "1.9.3") && Updater.newer("1.2", than: "1.1.9") && !Updater.newer("1.2.0", than: "1.2") && !Updater.newer("1.1.0", than: "1.2.0"), "versions compare number by number")
+    let feed = { (asset: String) in Data(#"{"tag_name":"v1.2.0","assets":[\#(asset)]}"#.utf8) }
+    let good = try? Updater.latest(feed(#"{"name":"Zaslon-1.2.0.dmg","browser_download_url":"https://example.com/z.dmg","digest":"sha256:ab12"}"#))
+    precondition(good == Release(version: "1.2.0", image: URL(string: "https://example.com/z.dmg")!, sha256: "ab12"), "a release is read from GitHub's answer")
+    precondition((try? Updater.latest(feed(#"{"name":"Zaslon-1.2.0.dmg","browser_download_url":"https://example.com/z.dmg"}"#))) == nil && (try? Updater.latest(Data("{}".utf8))) == nil, "no SHA-256, or no release: nothing to install")
     // The very lines that will run with admin rights, here without them and in a scratch folder.
     let folder = NSTemporaryDirectory() + "zaslon-rule-test"
     try? FileManager.default.removeItem(atPath: folder)

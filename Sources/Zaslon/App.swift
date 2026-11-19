@@ -23,6 +23,10 @@ enum Main {
             Gate.shared.start(port: port, dnsPort: dnsPort)
             dispatchMain()
         }
+        // --update <app> [feed]: bring that copy of the app up to the latest release, in the open (tests).
+        if let i = args.firstIndex(of: "--update"), i + 1 < args.count {
+            exit(Updater.once(bundle: URL(fileURLWithPath: args[i + 1]), feed: i + 2 < args.count ? args[i + 2] : Updater.feed))
+        }
         // --through <app>: start the app through the tunnel proxy, exactly as the button in the window does (tests).
         if let i = args.firstIndex(of: "--through"), i + 1 < args.count {
             Gate.shared.open(args[i + 1])
@@ -90,8 +94,12 @@ func relaunchSoon() {
     let window = ProcessInfo.processInfo.environment["SHOT"] != nil ? Still(contentViewController: content) : NSWindow(contentViewController: content)
     window.styleMask = [.titled, .closable]
     window.title = t("Zaslon (проверка)", "Zaslon (test)")
-    window.setFrameTopLeftPoint(NSPoint(x: 60, y: (NSScreen.main?.visibleFrame.maxY ?? 800) - 60))
+    // On the sharpest screen there is: a picture taken on an ordinary external monitor comes out at half the size.
+    let sharp = NSScreen.screens.max { $0.backingScaleFactor < $1.backingScaleFactor }?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1200, height: 860)
+    window.setFrameTopLeftPoint(NSPoint(x: sharp.minX + 60, y: sharp.maxY - 60))
     window.orderFrontRegardless()
+    // Placed again once the content has given the window its size: until then the system keeps it on the main screen.
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { window.setFrameTopLeftPoint(NSPoint(x: sharp.minX + 60, y: sharp.maxY - 60)) }
     func scrollView(in view: NSView) -> NSScrollView? { view as? NSScrollView ?? view.subviews.lazy.compactMap(scrollView).first }
     let scroll = { (y: CGFloat) in
         guard let list = scrollView(in: window.contentView!) else { return }
@@ -114,6 +122,8 @@ func relaunchSoon() {
         if let look = env["LOOK"] { window.appearance = NSAppearance(named: look == "light" ? .aqua : .darkAqua) }
         if env["DROP"] != nil { g.update(false) }
         if env["OFF"] != nil { g.enabled = false }
+        // The settings picture shows updates switched on and up to date, whatever this Mac's own setting is.
+        if env["GEAR"] != nil { (Updater.shared.on, Updater.shared.latest) = (true, true) }
         if env["LOG"] != nil { // the journal with a fixed evening of outages, in memory only
             let day = Calendar.current.startOfDay(for: Date())
             func outage(_ from: Double, _ to: Double, _ frozen: [String], _ refused: Int) -> Outage {
@@ -140,6 +150,7 @@ func relaunchSoon() {
             // IDLE=1 waits until an idle bar should have faded out; TAP=1 shoots while the ring is on its way.
             after(env["IDLE"] != nil ? 5.5 : env["TAP"] != nil ? 2.6 + (Double(env["TAP"]!) ?? 0.2) : 2.5) {
                 if let image = picture() { save(image, shot) }
+                print("picture on \(window.screen?.localizedName ?? "no screen") at \(window.backingScaleFactor)x, window at \(window.frame.origin)")
                 exit(0)
             }
         }
@@ -243,6 +254,7 @@ final class Delegate: NSObject, NSApplicationDelegate {
         TunnelProxy.shared.start()
         Gate.shared.start()
         Gate.shared.watch()
+        Updater.shared.watch()
         guard !UserDefaults.standard.bool(forKey: "askedLogin") else { return }
         UserDefaults.standard.set(true, forKey: "askedLogin")
         let a = NSAlert()
@@ -719,13 +731,75 @@ struct RemoveButton: View {
     }
 }
 
+/// The settings, shown in place of the list: autostart, updates, language.
+struct SettingsView: View {
+    @ObservedObject var catalog: Catalog
+    @ObservedObject var updater = Updater.shared
+    @ObservedObject var lang = Lang.shared
+    let close: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(t("Настройки", "Settings")).font(.system(size: 15, weight: .semibold)).padding(.bottom, 12)
+            Divider()
+            HStack(spacing: 8) {
+                Text(t("Запускать при входе", "Launch at login")).font(.system(size: 13))
+                Spacer()
+                Toggle(t("Запускать при входе", "Launch at login"), isOn: Binding(get: { catalog.login }, set: { catalog.setLogin($0) }))
+                    .labelsHidden().toggleStyle(Switch())
+            }
+            .padding(.vertical, 9)
+            Divider()
+            HStack(spacing: 8) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(t("Обновлять автоматически", "Update automatically")).font(.system(size: 13))
+                    Text(updater.status).font(.system(size: 12)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer()
+                // Under Homebrew the formula owns the app: no switch, the line above says how to update.
+                if !Updater.brewed {
+                    Toggle(t("Обновлять автоматически", "Update automatically"), isOn: Binding(get: { updater.on }, set: { updater.choose($0) }))
+                        .labelsHidden().toggleStyle(Switch())
+                }
+            }
+            .padding(.vertical, 9)
+            Divider()
+            HStack(spacing: 8) {
+                Text(t("Язык", "Language")).font(.system(size: 13))
+                Spacer()
+                // Two plain chips, not a system control: they look the same in both themes and in an inactive window.
+                HStack(spacing: 4) {
+                    ForEach([("ru", "Русский"), ("en", "English")], id: \.0) { code, name in
+                        Button { lang.choose(code) } label: {
+                            Text(name).font(.system(size: 11, weight: .medium)).padding(.horizontal, 8).padding(.vertical, 3)
+                                .foregroundStyle(lang.code == code ? HierarchicalShapeStyle.primary : .tertiary)
+                                .modifier(Chip(rest: lang.code == code ? 0.1 : 0, outline: lang.code == code ? 0.2 : 0.1))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            .padding(.vertical, 9)
+            Divider()
+            HStack {
+                Spacer()
+                Button(action: close) { Text(t("Закрыть", "Close")).padding(.vertical, 5).contentShape(Rectangle()) }
+            }
+            .buttonStyle(.plain).font(.system(size: 12)).foregroundStyle(.secondary)
+            .padding(.top, 12)
+        }
+    }
+}
+
 struct Panel: View {
     @ObservedObject var g: Guard
     @ObservedObject var catalog: Catalog
     @ObservedObject var gate = Gate.shared
     @ObservedObject var lang = Lang.shared // every string below is read again when the language changes
-    @State private var settings = ProcessInfo.processInfo.environment["GEAR"] != nil // GEAR=1: open in the test window
-    @State private var journal = ProcessInfo.processInfo.environment["LOG"] != nil // LOG=1: open in the test window
+    /// What the window shows. The journal and the settings each take the whole window, in place of the list.
+    enum Screen { case list, journal, settings }
+    // In the test window GEAR=1 opens the settings and LOG=1 the journal.
+    @State private var screen: Screen = ProcessInfo.processInfo.environment["GEAR"] != nil ? .settings : ProcessInfo.processInfo.environment["LOG"] != nil ? .journal : .list
     @FocusState private var searching: Bool
 
     init(g: Guard, catalog: Catalog = .shared) {
@@ -735,7 +809,11 @@ struct Panel: View {
 
     var body: some View {
         Group {
-            if journal { JournalView(journal: .shared) { journal = false } } else { main }
+            switch screen {
+            case .list: main
+            case .journal: JournalView(journal: .shared) { screen = .list }
+            case .settings: SettingsView(catalog: catalog) { screen = .list }
+            }
         }
         .padding(16)
         .frame(width: 320)
@@ -754,17 +832,16 @@ struct Panel: View {
                     .font(.system(size: 12)).foregroundStyle(.secondary)
                 }
                 Spacer()
-                Button { journal = true } label: {
+                Button { screen = .journal } label: {
                     Image(systemName: "clock").font(.system(size: 14)).foregroundStyle(.secondary)
                         .frame(width: 28, height: 28).modifier(Chip())
                 }
                 .buttonStyle(.plain).help(t("Журнал обрывов", "Outage journal")).padding(.trailing, -8)
-                Button { settings.toggle() } label: {
-                    Image(systemName: settings ? "gearshape.fill" : "gearshape").font(.system(size: 14))
-                        .foregroundStyle(settings ? HierarchicalShapeStyle.primary : .secondary)
+                Button { screen = .settings } label: {
+                    Image(systemName: "gearshape").font(.system(size: 14)).foregroundStyle(.secondary)
                         .frame(width: 28, height: 28).modifier(Chip())
                 }
-                .buttonStyle(.plain).help(settings ? t("Скрыть настройки", "Hide settings") : t("Настройки", "Settings"))
+                .buttonStyle(.plain).help(t("Настройки", "Settings"))
             }
             .padding(.bottom, 14)
             Divider()
@@ -798,34 +875,6 @@ struct Panel: View {
                     .help(t("Убрать из списка", "Remove from the list"))
                 }
                 .padding(.vertical, 9)
-                Divider()
-            }
-            // Behind the gear: the settings.
-            if settings {
-                HStack(spacing: 8) {
-                    Text(t("Запускать при входе", "Launch at login")).font(.system(size: 13))
-                    Spacer()
-                    Toggle(t("Запускать при входе", "Launch at login"), isOn: Binding(get: { catalog.login }, set: { catalog.setLogin($0) }))
-                        .labelsHidden().toggleStyle(Switch())
-                }
-                .padding(.vertical, 8)
-                Divider()
-                HStack(spacing: 8) {
-                    Text(t("Язык", "Language")).font(.system(size: 13))
-                    Spacer()
-                    // Two plain chips, not a system control: they look the same in both themes and in an inactive window.
-                    HStack(spacing: 4) {
-                        ForEach([("ru", "Русский"), ("en", "English")], id: \.0) { code, name in
-                            Button { lang.choose(code) } label: {
-                                Text(name).font(.system(size: 11, weight: .medium)).padding(.horizontal, 8).padding(.vertical, 3)
-                                    .foregroundStyle(lang.code == code ? HierarchicalShapeStyle.primary : .tertiary)
-                                    .modifier(Chip(rest: lang.code == code ? 0.1 : 0, outline: lang.code == code ? 0.2 : 0.1))
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                }
-                .padding(.vertical, 8)
                 Divider()
             }
             // The picker is always in the tree and only revealed. Measured with --bench: opening it costs 0–3 ms this way, 8–9 ms when rebuilt each time.
