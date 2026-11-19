@@ -30,7 +30,7 @@ final class Tunnel {
         if IPv4Address(host) != nil || IPv6Address(host) != nil { return connect(host, port, tunnel, then) }
         if let hit = cache[host], hit.until > Date() { return connect(hit.address, port, tunnel, then) }
         lookups.async {
-            let address = realAddress(host)
+            let address = realAddress(host, through: tunnel.name)
             self.queue.async {
                 guard let address else { return then(nil) }
                 self.cache[host] = (address, Date().addingTimeInterval(60))
@@ -84,7 +84,7 @@ final class Tunnel {
 
 /// A name's real IPv4 address, asked from the system's main DNS servers (/etc/resolv.conf: WARP's own resolver while
 /// the VPN is up). The usual lookup calls cannot be used here: they follow the gate's rule and answer 127.0.0.1.
-func realAddress(_ host: String) -> String? {
+func realAddress(_ host: String, through tunnel: String) -> String? {
     let lines = (try? String(contentsOfFile: "/etc/resolv.conf", encoding: .utf8))?.split(separator: "\n") ?? []
     let servers: [String] = lines.compactMap { line in
         let words = line.split(separator: " ")
@@ -98,6 +98,13 @@ func realAddress(_ host: String) -> String? {
         var wait = timeval(tv_sec: 2, tv_usec: 0)
         setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &wait, socklen_t(MemoryLayout<timeval>.size))
         guard var to = ipv4(server, 53) else { continue }
+        // A resolver on this Mac (WARP's own, while the VPN is up) is asked as it is. Any other one is asked only
+        // through the tunnel: if the VPN went a moment ago and the system now names the network's resolver, the
+        // question fails here instead of telling that resolver which servers this Mac talks to.
+        if !server.hasPrefix("127.") {
+            var index = if_nametoindex(tunnel)
+            guard index != 0, setsockopt(s, IPPROTO_IP, 25 /* IP_BOUND_IF */, &index, socklen_t(MemoryLayout<UInt32>.size)) == 0 else { continue }
+        }
         let ok = withUnsafePointer(to: &to) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { Darwin.connect(s, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) } }
         guard ok == 0, send(s, query, query.count, 0) == query.count else { continue }
         var reply = [UInt8](repeating: 0, count: 1500)
@@ -168,12 +175,21 @@ final class TunnelProxy: ObservableObject {
     /// Starts listening. `interface` pins the proxy to that interface instead of the VPN tunnel (tests only).
     func start(port: UInt16 = TunnelProxy.port, interface: String? = nil) {
         if let interface { tunnel.pinned = interface }
+        // While an older copy of Zaslon still holds the port (a restart hands over without a gap), keep asking.
+        let again = { self.tunnel.queue.asyncAfter(deadline: .now() + 0.5) { self.start(port: port) } }
         let local = NWParameters.tcp
         local.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: port)!) // this Mac only
         local.allowLocalEndpointReuse = true
-        guard let listener = try? NWListener(using: local) else { return }
+        guard let listener = try? NWListener(using: local) else { return again() }
         listener.stateUpdateHandler = { [weak self] state in
-            let up = { if case .ready = state { return true } else { return false } }()
+            var up = false
+            switch state {
+            case .ready: up = true
+            case .failed:
+                listener.cancel()
+                again()
+            default: break
+            }
             DispatchQueue.main.async { self?.listening = up }
         }
         listener.newConnectionHandler = { [weak self] client in self?.accept(client) }

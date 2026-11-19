@@ -37,8 +37,6 @@ final class Updater: ObservableObject {
     /// The last check found nothing newer. Only then does the status say "the latest".
     @Published var latest = false
     private var found: Release?
-    /// Stops the apps on the list before Zaslon restarts itself. Set by the guard.
-    var hold: () -> Void = {}
     private var busy = false
 
     func choose(_ on: Bool) {
@@ -78,14 +76,12 @@ final class Updater: ObservableObject {
                 DispatchQueue.main.async { self.step = .updating(release.version) }
                 // Switched off while this was running: stop before anything is replaced.
                 try Self.install(release, over: Bundle.main.bundleURL) { UserDefaults.standard.bool(forKey: "autoUpdate") }
-                DispatchQueue.main.async {
-                    UserDefaults.standard.set(["version": release.version, "at": Date()], forKey: "updated")
-                    // For the seconds without a running copy nobody watches the VPN, so the apps wait frozen; the
-                    // new copy thaws them with its first "connected" answer.
-                    self.hold()
-                    relaunchSoon()
-                    NSApp.terminate(nil)
-                }
+                UserDefaults.standard.set(["version": release.version, "at": Date()], forKey: "updated")
+                // The new copy starts beside this one. This one keeps watching the VPN until the new one does, and
+                // is then asked by it to leave (Main.succeed): no moment passes with nobody watching.
+                Self.run("/usr/bin/open", ["-n", Bundle.main.bundlePath, "--args", "--takeover"])
+                // Still here a minute later: the new copy did not come up. Say so and try again at the next pass.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 60) { (self.step, self.busy) = (.failed(release.version), false) }
             } catch {
                 let off = !UserDefaults.standard.bool(forKey: "autoUpdate")
                 show(off ? .idle : release.map { .failed($0.version) } ?? .idle, false)

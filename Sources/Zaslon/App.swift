@@ -42,25 +42,46 @@ enum Main {
         ZaslonApp.main()
     }
 
-    /// One tray instance at a time, through a lock file. The copy started by the system's launch agent is the one
-    /// that gets restarted after a crash, so it wins: it asks an older copy to quit and waits for the lock. Any
-    /// other second copy just leaves.
+    /// One tray instance at a time, through a lock file. A copy started by the system's launch agent (the one that
+    /// is restarted after a crash) or with `--takeover` (the one an update starts) replaces an older copy; any other
+    /// second copy just leaves.
+    ///
+    /// The older copy is not asked to quit here. It still watches the VPN, and it goes on doing so until this copy
+    /// watches too: see `succeed`. So a restart of Zaslon leaves no moment with nobody watching.
     static func onlyOne() {
         let folder = NSHomeDirectory() + "/Library/Application Support/Zaslon"
         try? FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
         let lock = open(folder + "/lock", O_RDWR | O_CREAT, 0o600)
         guard lock >= 0 else { return }
         if flock(lock, LOCK_EX | LOCK_NB) != 0 {
-            guard managed else { exit(0) }
+            guard managed || CommandLine.arguments.contains("--takeover") else { exit(0) }
             var text = [CChar](repeating: 0, count: 32)
             pread(lock, &text, 31, 0)
-            if let holder = pid_t(String(cString: text).trimmingCharacters(in: .whitespacesAndNewlines)), holder > 1 { kill(holder, SIGTERM) }
-            flock(lock, LOCK_EX) // returns once the older copy is gone
+            predecessor = (pid_t(String(cString: text).trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0, lock)
+            return
         }
+        claim(lock)
+    }
+
+    private static var predecessor: (pid: pid_t, lock: Int32)?
+
+    /// The descriptor stays open for the life of the process: that is what holds the lock.
+    private static func claim(_ lock: Int32) {
         ftruncate(lock, 0)
         let me = "\(getpid())\n"
         pwrite(lock, me, me.utf8.count, 0)
-        // The descriptor stays open for the life of the process: that is what holds the lock.
+    }
+
+    /// This copy has its first answer about the VPN and has acted on it: the older copy may go now. Its exit frees
+    /// the lock and the ports, which the gate and the proxy here keep asking for until they get them.
+    static func succeed() {
+        guard let old = predecessor else { return }
+        predecessor = nil
+        if old.pid > 1 { kill(old.pid, SIGTERM) }
+        DispatchQueue.global().async {
+            flock(old.lock, LOCK_EX) // returns once the older copy is gone
+            claim(old.lock)
+        }
     }
 }
 

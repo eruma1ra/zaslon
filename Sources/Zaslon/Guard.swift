@@ -181,7 +181,6 @@ final class Guard: ObservableObject {
         self.wire = wire
         monitor.pathUpdateHandler = { [weak self] _ in DispatchQueue.main.async { self?.check() } }
         monitor.start(queue: .global())
-        Updater.shared.hold = { [weak self] in self?.holdAll() }
         apply() // freeze first, ask second
         check()
     }
@@ -205,6 +204,7 @@ final class Guard: ObservableObject {
                 self.checking = false
                 if ok { self.learn(nets) }
                 if let procs { self.update(ok, procs) } // nil: still connected, nothing to do
+                Main.succeed() // this copy watches now; an older one that waited for that may leave
             }
         }
     }
@@ -266,18 +266,6 @@ final class Guard: ObservableObject {
     func thawAll() {
         for pid in frozen { signal(pid, SIGCONT) }
         frozen = []
-    }
-
-    /// Stops everything on the list and leaves it stopped, for a restart of Zaslon itself: while no copy is
-    /// running nobody would notice a drop, so the apps wait. The next copy freezes first anyway and thaws them
-    /// with its first "connected" answer.
-    func holdAll() {
-        let procs = list()
-        var all = Set<pid_t>()
-        for e in entries where e.off != true { all.formUnion(tree(of: e, in: procs)) }
-        all.remove(getpid())
-        for pid in all { signal(pid, SIGSTOP) }
-        frozen = all
     }
 }
 
@@ -431,15 +419,6 @@ func selftest() {
     precondition(Journal.span(read[0]).hasSuffix("– ?") && !Journal.span(read[1]).hasSuffix("?"))
     precondition(Journal.facts(kept.outages[0]) == ["Заморожено: Claude"] && Journal.facts(Outage(start: t0, off: true)) == ["Защита была выключена"], "what was frozen is shown even if the outage began with protection off")
     try? FileManager.default.removeItem(atPath: journalFile)
-    // A restart of Zaslon itself: everything on the list that is protected is stopped and stays stopped.
-    var held: [pid_t: Int32] = [:]
-    let holder = Guard(entries: [Entry(name: "A", matches: ["a"]), Entry(name: "B", matches: ["b"], off: true)], live: false)
-    holder.list = { [Proc(pid: 501, ppid: 1, path: "/x/a", origin: ""), Proc(pid: 502, ppid: 501, path: "/x/child", origin: ""), Proc(pid: 503, ppid: 1, path: "/x/b", origin: "")] }
-    holder.signal = { held[$0] = $1 }
-    holder.update(true)
-    held = [:]
-    holder.holdAll()
-    precondition(held == [501: SIGSTOP, 502: SIGSTOP], "a hold stops the protected trees and nothing else")
     // Updates: versions compare as numbers, and a release counts only with a disk image and its SHA-256.
     precondition(Updater.newer("1.10.0", than: "1.9.3") && Updater.newer("1.2", than: "1.1.9") && !Updater.newer("1.2.0", than: "1.2") && !Updater.newer("1.1.0", than: "1.2.0"), "versions compare number by number")
     let feed = { (asset: String) in Data(#"{"tag_name":"v1.2.0","assets":[\#(asset)]}"#.utf8) }
