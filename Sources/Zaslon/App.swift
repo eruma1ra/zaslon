@@ -79,8 +79,20 @@ enum Main {
         predecessor = nil
         if old.pid > 1 { kill(old.pid, SIGTERM) }
         DispatchQueue.global().async {
-            flock(old.lock, LOCK_EX) // returns once the older copy is gone
+            while flock(old.lock, LOCK_EX | LOCK_NB) != 0 {
+                // The older copy is gone and the lock is still taken: another copy took over at the same moment.
+                // The launch agent's copy is the one that stays, so it asks that one to leave; any other leaves itself.
+                if old.pid > 1, kill(old.pid, 0) != 0 {
+                    guard managed else { exit(0) }
+                    var text = [CChar](repeating: 0, count: 32)
+                    pread(old.lock, &text, 31, 0)
+                    if let holder = pid_t(String(cString: text).trimmingCharacters(in: .whitespacesAndNewlines)), holder > 1, holder != getpid() { kill(holder, SIGTERM) }
+                }
+                usleep(100_000)
+            }
             claim(old.lock)
+            // The older copy wrote its journal on the way out: take in what it saw after this copy had read the file.
+            DispatchQueue.main.async { Journal.shared.reload() }
         }
     }
 }

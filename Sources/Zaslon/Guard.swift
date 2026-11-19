@@ -418,6 +418,12 @@ func selftest() {
     precondition(read.map(\.cut) == [true, nil] && abs(read[1].end!.timeIntervalSince(t0 - 59.6)) < 0.001, "an outage left open by a quit is read back as cut short; one under a second keeps its length")
     precondition(Journal.span(read[0]).hasSuffix("– ?") && !Journal.span(read[1]).hasSuffix("?"))
     precondition(Journal.facts(kept.outages[0]) == ["Заморожено: Claude"] && Journal.facts(Outage(start: t0, off: true)) == ["Защита была выключена"], "what was frozen is shown even if the outage began with protection off")
+    // A hand-over: what the older copy wrote after this copy had read the file is taken in, once.
+    let later = Journal(file: journalFile)
+    kept.outages.insert(Outage(start: t0 + 500, end: t0 + 520, frozen: ["ChatGPT"]), at: 0)
+    kept.store(wait: true)
+    later.reload(); later.reload()
+    precondition(later.outages.count == 3 && later.outages[0].frozen == ["ChatGPT"], "the journal takes in an older copy's last entries")
     try? FileManager.default.removeItem(atPath: journalFile)
     // Updates: versions compare as numbers, and a release counts only with a disk image and its SHA-256.
     precondition(Updater.newer("1.10.0", than: "1.9.3") && Updater.newer("1.2", than: "1.1.9") && !Updater.newer("1.2.0", than: "1.2") && !Updater.newer("1.1.0", than: "1.2.0"), "versions compare number by number")

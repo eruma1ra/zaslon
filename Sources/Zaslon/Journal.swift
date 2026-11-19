@@ -39,6 +39,17 @@ final class Journal: ObservableObject {
         return (to, from)
     }()
 
+    /// Reads the file again and adds the outages that are not here yet. After a hand-over the older copy's last
+    /// entries are in the file, not in this copy's memory.
+    func reload() {
+        guard let file, let saved = FileManager.default.contents(atPath: file).flatMap({ try? Self.coder.1.decode([Outage].self, from: $0) }) else { return }
+        let known = Set(outages.map(\.id))
+        let missing = saved.filter { !known.contains($0.id) }
+        guard !missing.isEmpty else { return }
+        outages = Array((outages + missing).sorted { $0.start > $1.start }.prefix(50))
+        save()
+    }
+
     /// The VPN went away (`connected: false`) or came back.
     func mark(connected: Bool, off: Bool = false, at time: Date = Date()) {
         let open = outages.first?.end == nil && !outages.isEmpty
