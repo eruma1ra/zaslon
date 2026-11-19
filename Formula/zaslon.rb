@@ -3,10 +3,10 @@
 #   brew trust eruma1ra/zaslon
 #   brew install zaslon
 class Zaslon < Formula
-  desc "VPN kill switch for AI apps: ChatGPT and Claude only through the WARP tunnel"
+  desc "VPN kill switch for AI apps: ChatGPT and Claude only through the VPN tunnel"
   homepage "https://github.com/eruma1ra/zaslon"
-  url "https://github.com/eruma1ra/zaslon/archive/refs/tags/v1.2.0.tar.gz"
-  sha256 "0300f435a00f60864e4c70480bcfe668aa2bfbf3649843c5008da4303a23df2d"
+  url "https://github.com/eruma1ra/zaslon/archive/refs/tags/v1.3.0.tar.gz"
+  sha256 "f3ce544ae4ecfd14b00adf537e2030f60985c082612f79ffd5e8bc3126d0a953"
   license "MIT"
   head "https://github.com/eruma1ra/zaslon.git", branch: "main"
 
@@ -35,7 +35,7 @@ class Zaslon < Formula
       After `brew upgrade zaslon`, run `zaslon` once more: macOS starts the
       launch agent of a rebuilt app only after the app has registered it again.
 
-      Zaslon needs Cloudflare WARP (warp-cli).
+      Zaslon needs Cloudflare WARP (warp-cli) or Happ in TUN mode.
     EOS
   end
 

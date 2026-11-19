@@ -12,7 +12,7 @@ If the VPN is not there, ChatGPT and Claude cannot reach their servers at all, a
 
 *Zaslon* (заслон) is Russian for "barrier". It is a small menu bar app, written in Swift and SwiftUI, with no dependencies. It was built for a setup where the VPN must always be on and nothing an AI app sends may leave the Mac outside of it.
 
-> Zaslon works with **Cloudflare WARP** only. The interface comes in English and Russian.
+> Zaslon works with **Cloudflare WARP** and with **Happ** (a client for VLESS, Reality and the like). The Happ mode is new and has not been tried on a real Happ yet: see [Which VPN](#which-vpn). The interface comes in English and Russian.
 
 ## Get it
 
@@ -50,7 +50,7 @@ flowchart LR
     R --> D["Zaslon DNS answerer<br>127.0.0.1:5354"]
     D -- "2 · it is at 127.0.0.1" --> P
     P -- "3 · TLS to 127.0.0.1:443" --> F["Zaslon forwarder<br>reads the server name"]
-    F -- "4 · connection pinned<br>to the WARP tunnel" --> S["Real server"]
+    F -- "4 · connection pinned<br>to the VPN tunnel" --> S["Real server"]
     F -. "no tunnel" .-> X["Connection refused"]
 ```
 
@@ -85,6 +85,8 @@ How a drop is noticed:
 - **`warp-cli status`, twice a second**, and ten times a second during a drop. Only this answer can thaw the apps; the tripwire can only freeze.
 - **Unknown means unprotected.** Zaslon freezes the list before the first answer arrives. A missing or hung `warp-cli` keeps it frozen.
 
+With Happ the same two checks run; only the question differs (see [Which VPN](#which-vpn)).
+
 **The 0.05 s gap.** The tripwire runs every 50 ms, so for up to 50 ms after a drop a listed app is still running and may send on a connection that is already open. That is the price of reacting. Two more facts, both measured:
 
 - While an app is frozen it sends nothing, but the kernel still *receives* on its open connections (about 25 KB per app in the test).
@@ -117,7 +119,7 @@ Every state, in the light and the dark theme.
 | **Adding an app** | <img src="docs/picker-light.png" width="330" alt="Adding an app, light"> | <img src="docs/picker-dark.png" width="330" alt="Adding an app, dark"> |
 | **Journal** | <img src="docs/journal-light.png" width="330" alt="Journal, light"> | <img src="docs/journal-dark.png" width="330" alt="Journal, dark"> |
 
-The header says what is going on:
+The header says what is going on (with Happ it names Happ):
 
 | Header | Meaning |
 |---|---|
@@ -144,7 +146,7 @@ Controls:
 - **×**: removes the app from the list. For ChatGPT and Claude this also removes the gate rule and asks for the password again.
 - **+ Add**: add an app from a searchable list of everything installed. Adding ChatGPT or Claude asks for the admin password; if you refuse, the app is not added.
 - **Clock**: the journal of outages (below).
-- **Gear**: the settings, shown in place of the list like the journal. **Launch at login**, and **Language**: English or Russian. Zaslon starts in the system's language.
+- **Gear**: the settings, shown in place of the list like the journal. **Launch at login**, **VPN** (Auto, WARP or Happ: see [Which VPN](#which-vpn)), and **Language**: English or Russian. Zaslon starts in the system's language.
 - **Quit**.
 
 ## The journal
@@ -155,10 +157,22 @@ An outage is counted from the moment Zaslon stops the apps to the moment WARP re
 
 The journal holds the last 50 outages in `~/Library/Application Support/Zaslon/journal.json`.
 
+## Which VPN
+
+Zaslon watches one VPN. The settings say which: **Auto**, **WARP** or **Happ**.
+
+- **Auto** looks at what is installed: WARP if `warp-cli` is there, otherwise Happ. The row shows which one it took. This is settled when Zaslon starts; installing or removing a VPN later does not move the watch.
+- **WARP** is asked through `warp-cli status`, as described above.
+- **Happ** has no such command, so Zaslon asks the kernel which tunnel interface a process of the Happ app holds open. That tunnel, while it is up, is Happ's; no other tunnel counts, so WARP's is never taken for it. The gate is pinned to it. The protocol inside Happ (VLESS, Reality, Trojan and so on) makes no difference: Zaslon sees only the tunnel. Happ must run as a system-wide tunnel (TUN); as a plain local proxy it has no tunnel and Zaslon keeps the list frozen.
+
+Zaslon never moves from one VPN to the other by itself. If the watched one drops while another is up, the list stays frozen until the watched one is back. Changing the setting freezes the list first; only an answer about the newly chosen VPN thaws it. Connections the gate already opened stay on the tunnel they were pinned to.
+
+**Not tried on a real Happ.** The Mac this was built on runs WARP and may not run without it. What was checked: with the setting on Happ and no Happ present, Zaslon reports "not connected", names no tunnel (WARP's tunnel is not taken for Happ's) and the tunnel proxy refuses every connection. `Zaslon --vpn` prints what Zaslon sees, and every tunnel holder it can read; if Happ is connected and the first line says it is not, open an issue with the output. A build of Happ that keeps its tunnel in a helper running as root cannot be read and stays "not connected". Another client can be tried with `defaults write local.zaslon vpnName <part of its app's name>`.
+
 ## Requirements
 
 - macOS 14 or newer
-- [Cloudflare WARP](https://developers.cloudflare.com/warp-client/) with `warp-cli` at `/usr/local/bin/warp-cli`
+- [Cloudflare WARP](https://developers.cloudflare.com/warp-client/) with `warp-cli` at `/usr/local/bin/warp-cli`, or [Happ](https://apps.apple.com/app/id6504287215) in TUN mode
 
 ## Install
 
@@ -226,6 +240,7 @@ Everything runs from the binary inside the bundle, `Zaslon.app/Contents/MacOS/Za
 | `--selftest` | Checks the logic: freeze and thaw on a fake process table, the tripwire, TLS server name parsing, DNS answers, the rule script (in a scratch folder, without admin rights), the connection reader. |
 | `--cover <app or name…>` | Read-only. Lists every process an entry would freeze and every connection they hold, marking the ones outside the VPN. |
 | `--drill <seconds> <app or name…>` | A fire drill without touching the VPN: freezes the given programs through the real code path, then thaws them. |
+| `--vpn` | Read-only. Says which VPN is watched, whether Zaslon sees it connected, and its tunnels. |
 | `--gate <port> <dns port> [interface]` | Runs only the gate on spare ports. |
 | `--proxy <port> [interface]` | Runs only the tunnel proxy. |
 | `--window`, `--picker` | Shows the panel in a normal window. With `SHOT=<file.png>` it saves a picture and quits; `LOOK=light\|dark`, `UI=en\|ru`, `DROP=1`, `OFF=1`, `GEAR=1` and `LOG=1` choose the state. |
@@ -242,7 +257,7 @@ Everything runs from the binary inside the bundle, `Zaslon.app/Contents/MacOS/Za
 
 ## Limits
 
-- Cloudflare WARP only. Another VPN needs its own "is it connected" check.
+- Cloudflare WARP and Happ. The Happ mode has not been tried on a real Happ.
 - The freeze has a window of up to 50 ms, and the kernel keeps receiving on open connections.
 - The gate knows two services, at fixed paths: `/Applications/ChatGPT.app` and `/Applications/Claude.app`. The list is in `Gate.swift`.
 - One address per name, IPv4 only. The DNS answerer gives no IPv6 answer, so programs use IPv4.
@@ -253,6 +268,7 @@ Everything runs from the binary inside the bundle, `Zaslon.app/Contents/MacOS/Za
 | File | What is in it |
 |---|---|
 | `Sources/Zaslon/Guard.swift` | The freeze: process scan, process trees, WARP check, tripwire, self-test. |
+| `Sources/Zaslon/Vpn.swift` | Which VPN is watched: the choice, and the question asked of Happ. |
 | `Sources/Zaslon/Gate.swift` | The gate: DNS answerer, forwarder, the `/etc/resolver` rule, the connection reader. |
 | `Sources/Zaslon/Proxy.swift` | Tunnel-pinned connections, the real-address lookup, the `CONNECT` proxy. |
 | `Sources/Zaslon/Journal.swift` | The journal of outages and its view. |

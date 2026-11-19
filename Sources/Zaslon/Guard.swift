@@ -196,12 +196,14 @@ final class Guard: ObservableObject {
         // While WARP is up and nothing is frozen, the process scan only feeds the dots in the window, so one scan
         // in four is enough (every 2 s). Measured: scanning on every answer cost 4% of a core around the clock.
         let scan = protected != true || !frozen.isEmpty || ticks % 20 == 0
+        let vpn = Vpn.current
         DispatchQueue.global(qos: .userInitiated).async {
-            let ok = warpConnected()
-            let nets = ok ? tunnels() : []
+            let (ok, nets) = vpn.state() // WARP: warp-cli and the tunnels, as ever; Happ: see Vpn.swift
             let procs = scan || !ok ? list() : nil // off the main thread: a scan takes 5–10 ms
             DispatchQueue.main.async {
                 self.checking = false
+                // The setting changed while this was asked: the answer is about the other VPN and may not thaw anything.
+                guard vpn == Vpn.current else { return self.check() }
                 if ok { self.learn(nets) }
                 if let procs { self.update(ok, procs) } // nil: still connected, nothing to do
             }
@@ -286,6 +288,14 @@ func selftest() {
     precondition(!parseWarp("Status update: Disconnected\nReason: Manual Disconnection"))
     precondition(!parseWarp("Status update: Connecting"))
     precondition(!parseWarp(""))
+    // Which VPN: a choice made by hand wins; "auto" takes WARP when it is installed.
+    precondition(Vpn.pick("auto", warpInstalled: true) == .warp && Vpn.pick("auto", warpInstalled: false) == .happ)
+    precondition(Vpn.pick("happ", warpInstalled: true) == .happ && Vpn.pick("warp", warpInstalled: false) == .warp)
+    // A tunnel is Happ's when a process from inside the Happ app holds it; the name is matched on the app, not on the whole path.
+    precondition(inApp("/Applications/Happ.app/Contents/PlugIns/Tunnel.appex/Contents/MacOS/Tunnel", named: "happ"))
+    precondition(inApp("/Applications/Happ - Proxy Utility.app/Contents/MacOS/Happ", named: "happ"))
+    precondition(!inApp("/Users/chappell/Tools/Other.app/Contents/MacOS/Other", named: "happ") && !inApp("/usr/local/bin/happ", named: "happ"))
+    precondition(tunnelsHeld(by: getpid()).isEmpty && happTunnels([]).isEmpty, "this process holds no tunnel; no Happ process, no tunnel")
 
     // Logic on a fake process table.
     let app = Entry(name: "App", matches: ["/Applications/App.app", "tool"])

@@ -19,7 +19,7 @@ final class Tunnel {
     /// The VPN tunnel right now, asked afresh for every connection: the utun that is up and holds an IPv4 address
     /// (the system's own utuns have neither). nil when there is no such tunnel.
     var interface: NWInterface? {
-        let names = pinned.map { [$0] } ?? tunnels().map { String($0.prefix { $0 != "/" }) }
+        let names = pinned.map { [$0] } ?? Vpn.tunnelsNow().map { String($0.prefix { $0 != "/" }) }
         return monitor.currentPath.availableInterfaces.first { names.contains($0.name) }
     }
 
@@ -28,12 +28,16 @@ final class Tunnel {
     func open(_ host: String, _ port: NWEndpoint.Port, then: @escaping (NWConnection?) -> Void) {
         guard let tunnel = interface else { return then(nil) }
         if IPv4Address(host) != nil || IPv6Address(host) != nil { return connect(host, port, tunnel, then) }
-        if let hit = cache[host], hit.until > Date() { return connect(hit.address, port, tunnel, then) }
+        // An address is remembered for the VPN and tunnel it was asked through: after a change of VPN it is asked again.
+        let key = "\(Vpn.current.rawValue) \(tunnel.name) \(host)"
+        if let hit = cache[key], hit.until > Date() { return connect(hit.address, port, tunnel, then) }
         lookups.async {
             let address = realAddress(host)
             self.queue.async {
-                guard let address else { return then(nil) }
-                self.cache[host] = (address, Date().addingTimeInterval(60))
+                // The lookup took time. The tunnel is asked for again: after a drop or a change of VPN in the
+                // meantime this connection is refused, not opened through the tunnel that was there before.
+                guard let address, self.interface?.name == tunnel.name else { return then(nil) }
+                self.cache[key] = (address, Date().addingTimeInterval(60))
                 self.connect(address, port, tunnel, then)
             }
         }

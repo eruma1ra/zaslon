@@ -23,6 +23,11 @@ enum Main {
             Gate.shared.start(port: port, dnsPort: dnsPort)
             dispatchMain()
         }
+        // --vpn: which VPN is watched (WARP or Happ) and what Zaslon sees of it.
+        if args.contains("--vpn") {
+            vpnReport()
+            exit(0)
+        }
         // --through <app>: start the app through the tunnel proxy, exactly as the button in the window does (tests).
         if let i = args.firstIndex(of: "--through"), i + 1 < args.count {
             Gate.shared.open(args[i + 1])
@@ -723,9 +728,11 @@ struct RemoveButton: View {
     }
 }
 
-/// The settings, shown in place of the list: autostart and language.
+/// The settings, shown in place of the list: autostart, which VPN to watch, language.
 struct SettingsView: View {
+    @ObservedObject var g: Guard
     @ObservedObject var catalog: Catalog
+    @State private var vpn = Vpn.chosen
     @ObservedObject var lang = Lang.shared
     let close: () -> Void
 
@@ -742,17 +749,30 @@ struct SettingsView: View {
             .padding(.vertical, 9)
             Divider()
             HStack(spacing: 8) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("VPN").font(.system(size: 13))
+                    if vpn == "auto" { Text(t("Сейчас: ", "Now: ") + Vpn.current.name).font(.system(size: 12)).foregroundStyle(.secondary) }
+                }
+                Spacer()
+                HStack(spacing: 4) {
+                    ForEach([("auto", t("Авто", "Auto")), ("warp", "WARP"), ("happ", "Happ")], id: \.0) { code, name in
+                        chip(name, on: vpn == code) {
+                            guard vpn != code else { return }
+                            vpn = code
+                            Vpn.choose(code)
+                            g.trip() // freeze first; only an answer about the VPN now chosen thaws the list
+                        }
+                    }
+                }
+            }
+            .padding(.vertical, 9)
+            Divider()
+            HStack(spacing: 8) {
                 Text(t("Язык", "Language")).font(.system(size: 13))
                 Spacer()
-                // Two plain chips, not a system control: they look the same in both themes and in an inactive window.
                 HStack(spacing: 4) {
                     ForEach([("ru", "Русский"), ("en", "English")], id: \.0) { code, name in
-                        Button { lang.choose(code) } label: {
-                            Text(name).font(.system(size: 11, weight: .medium)).padding(.horizontal, 8).padding(.vertical, 3)
-                                .foregroundStyle(lang.code == code ? HierarchicalShapeStyle.primary : .tertiary)
-                                .modifier(Chip(rest: lang.code == code ? 0.1 : 0, outline: lang.code == code ? 0.2 : 0.1))
-                        }
-                        .buttonStyle(.plain)
+                        chip(name, on: lang.code == code) { lang.choose(code) }
                     }
                 }
             }
@@ -765,6 +785,16 @@ struct SettingsView: View {
             .buttonStyle(.plain).font(.system(size: 12)).foregroundStyle(.secondary)
             .padding(.top, 12)
         }
+    }
+
+    /// One choice in a row of them. A plain chip, not a system control: it looks the same in both themes and in an inactive window.
+    func chip(_ name: String, on: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(name).font(.system(size: 11, weight: .medium)).padding(.horizontal, 8).padding(.vertical, 3)
+                .foregroundStyle(on ? HierarchicalShapeStyle.primary : .tertiary)
+                .modifier(Chip(rest: on ? 0.1 : 0, outline: on ? 0.2 : 0.1))
+        }
+        .buttonStyle(.plain)
     }
 }
 
@@ -789,7 +819,7 @@ struct Panel: View {
             switch screen {
             case .list: main
             case .journal: JournalView(journal: .shared) { screen = .list }
-            case .settings: SettingsView(catalog: catalog) { screen = .list }
+            case .settings: SettingsView(g: g, catalog: catalog) { screen = .list }
             }
         }
         .padding(16)
@@ -934,10 +964,11 @@ struct Panel: View {
     }
 
     var subtitle: String {
+        let vpn = Vpn.current.name // WARP or Happ: the one that is watched
         switch g.protected {
-        case nil: return t("Спрашиваю WARP", "Asking WARP")
-        case true?: return t("WARP подключён", "WARP connected")
-        case false?: return g.freezing ? t("WARP отключён, ", "WARP disconnected, ") : t("WARP отключён, программы работают", "WARP disconnected, apps are running")
+        case nil: return t("Спрашиваю \(vpn)", "Asking \(vpn)")
+        case true?: return t("\(vpn) подключён", "\(vpn) connected")
+        case false?: return g.freezing ? t("\(vpn) отключён, ", "\(vpn) disconnected, ") : t("\(vpn) отключён, программы работают", "\(vpn) disconnected, apps are running")
         }
     }
 

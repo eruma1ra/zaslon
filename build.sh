@@ -30,8 +30,8 @@ cat > "$APP/Contents/Info.plist" <<'EOF'
 <key>CFBundleExecutable</key><string>Zaslon</string>
 <key>CFBundleIconFile</key><string>AppIcon</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>1.2.0</string>
-<key>CFBundleVersion</key><string>1.2.0</string>
+<key>CFBundleShortVersionString</key><string>1.3.0</string>
+<key>CFBundleVersion</key><string>1.3.0</string>
 <key>LSMinimumSystemVersion</key><string>14.0</string>
 <key>LSUIElement</key><true/>
 </dict></plist>
@@ -58,7 +58,7 @@ if [ "$1" = dmg ]; then
     mkdir -p build/dmg
     cp -R "$APP" build/dmg/
     ln -s /Applications build/dmg/Applications # drag the app onto it
-    hdiutil create -quiet -volname Zaslon -srcfolder build/dmg -ov -format UDZO build/Zaslon-1.2.0.dmg
+    hdiutil create -quiet -volname Zaslon -srcfolder build/dmg -ov -format UDZO build/Zaslon-1.3.0.dmg
     rm -rf build/dmg
-    echo "built build/Zaslon-1.2.0.dmg"
+    echo "built build/Zaslon-1.3.0.dmg"
 fi
