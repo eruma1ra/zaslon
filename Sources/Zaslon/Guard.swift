@@ -8,6 +8,7 @@ struct Proc {
     let ppid: pid_t
     let path: String // where the executable is now; empty once the file is deleted
     var origin = "" // where it was started from, as the kernel recorded at launch
+    var jobLeader = false // leads a job in a terminal, the process its shell waits on: never stopped (see apply)
 }
 
 struct Entry: Codable, Identifiable, Equatable {
@@ -43,7 +44,8 @@ func listProcs() -> [Proc] {
         let len = proc_pidpath(pid, &buf, UInt32(buf.count))
         var (mib, size) = ([CTL_KERN, KERN_PROCARGS2, pid], args.count - 1)
         let origin = sysctl(&mib, 3, &args, &size, nil, 0) == 0 && size > 4 ? args.withUnsafeBufferPointer { String(cString: $0.baseAddress! + 4) } : ""
-        return Proc(pid: pid, ppid: pid_t(info.pbi_ppid), path: len > 0 ? String(cString: buf) : "", origin: origin)
+        return Proc(pid: pid, ppid: pid_t(info.pbi_ppid), path: len > 0 ? String(cString: buf) : "", origin: origin,
+                    jobLeader: info.e_tdev != UInt32(bitPattern: -1) && info.pbi_pgid == UInt32(pid)) // NODEV: no terminal
     }
 }
 
@@ -233,8 +235,13 @@ final class Guard: ObservableObject {
         let procs = scanned ?? list()
         var all = Set<pid_t>(), released = Set<pid_t>()
         var up = Set<UUID>()
+        // Never stop a terminal job leader (an interactive claude or codex). On SIGSTOP its shell sees the job stop and
+        // takes the terminal back; after SIGCONT the program's next read fails and it exits, so every drop would end the
+        // terminal session. Its children are stopped as usual: they are not the shell's children, so it never notices.
+        // The leader's own traffic to the gated services has no window; other traffic from it can leave during a drop.
+        let leaders = Set(procs.filter(\.jobLeader).map(\.pid))
         for e in entries {
-            let t = tree(of: e, in: procs)
+            let t = tree(of: e, in: procs).subtracting(leaders)
             if !t.isEmpty { up.insert(e.id) }
             if e.off == true { released.formUnion(t) } else { all.formUnion(t) }
         }
@@ -340,6 +347,20 @@ func selftest() {
     g.trip()
     precondition(g.protected == false && sent.contains { $0.1 == SIGSTOP } && !g.cut([]), "a trip freezes at once and disarms itself")
     g.enabled = false
+
+    // A terminal job leader is never stopped: its shell takes the terminal back on SIGSTOP, and after SIGCONT the
+    // program's next read fails and it exits. Its children are still frozen. An entry with only a leader is not frozen.
+    let g3 = Guard(entries: [Entry(name: "C", matches: ["claude"])], live: false)
+    g3.list = { [Proc(pid: 50, ppid: 1, path: "/usr/local/bin/claude", jobLeader: true),
+                 Proc(pid: 51, ppid: 50, path: "/usr/local/bin/node"),
+                 Proc(pid: 52, ppid: 1, path: "/usr/local/bin/claude")] }
+    g3.signal = { sent.append(($0, $1)) }
+    sent = []
+    g3.update(false)
+    precondition(g3.frozen == [51, 52] && !sent.contains { $0.0 == 50 }, "a terminal job leader is not stopped")
+    g3.list = { [Proc(pid: 50, ppid: 1, path: "/usr/local/bin/claude", jobLeader: true)] }
+    g3.update(false)
+    precondition(g3.frozen.isEmpty && g3.running.isEmpty, "an entry with only a job leader does not count as frozen")
 
     // Switching one program off while unprotected thaws just that program.
     let g2 = Guard(entries: [Entry(name: "A", matches: ["a"]), Entry(name: "B", matches: ["b"])], live: false)
@@ -470,8 +491,10 @@ func drill(seconds: Double, matches: [String]) {
 func cover(matches: [String]) {
     let procs = listProcs()
     let pids = tree(of: Entry(name: "", matches: matches), in: procs)
-    for proc in procs where pids.contains(proc.pid) { print(proc.pid, "parent", proc.ppid, proc.path.isEmpty ? "(file gone) " + proc.origin : proc.path) }
-    print("\(pids.count) processes")
+    for proc in procs where pids.contains(proc.pid) {
+        print(proc.pid, "parent", proc.ppid, proc.path.isEmpty ? "(file gone) " + proc.origin : proc.path, proc.jobLeader ? "[terminal job leader: never stopped]" : "")
+    }
+    print("\(pids.count) processes, \(procs.filter { pids.contains($0.pid) && $0.jobLeader }.count) terminal job leaders")
     let inside = tunnelAddresses()
     var (links, count) = (0, [String: Int]())
     for proc in procs where pids.contains(proc.pid) {
