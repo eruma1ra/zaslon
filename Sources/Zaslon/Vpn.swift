@@ -41,18 +41,17 @@ enum Vpn: String {
         return (!nets.isEmpty, nets)
     }
 
-    /// The tunnels a new connection may be pinned to, right now. Never waits: the gate asks on the queue that
-    /// carries its data.
+    /// The tunnels a new connection may be pinned to, right now. The gate asks on the queue that carries its
+    /// data, so this does not scan all processes: it takes the Happ processes the last scan found and asks the
+    /// kernel afresh, for each, whether it is still a Happ process and which tunnels it holds this instant.
+    /// A process the last scan did not know can only be missed (the connection is refused), never taken wrongly.
     static func tunnelsNow() -> Set<String> {
         guard current == .happ else { return tunnels() }
-        let seen = happSeen.withLock { $0 }
-        let age = Date().timeIntervalSince(seen.at)
-        // The watch refreshes this twice a second. Without a watch (the test modes) it is refreshed from here.
-        if age > 0.6 { DispatchQueue.global(qos: .userInitiated).async { _ = happTunnels() } }
-        // ponytail: a tunnel name seen up to 2 s ago is trusted if that interface is still up. If another VPN took
-        // the same name within those 2 s, a connection would be pinned to it; compare addresses too if that shows up.
-        guard age < 2 else { return [] }
-        return tunnels().filter { seen.names.contains(String($0.prefix { $0 != "/" })) }
+        let seen = happPids.withLock { $0 }
+        if seen.at == .distantPast { return happTunnels() } // the first ask with no watch running (the test modes): one scan
+        // The watch scans twice a second. Without a watch the scan is renewed from here, off this queue.
+        if Date().timeIntervalSince(seen.at) > 0.6 { DispatchQueue.global(qos: .userInitiated).async { _ = happTunnels() } }
+        return tunnelsHeld(byHapp: seen.pids)
     }
 }
 
@@ -81,21 +80,29 @@ func inApp(_ path: String, named name: String) -> Bool {
     path.split(separator: "/").first { $0.hasSuffix(".app") }?.localizedCaseInsensitiveContains(name) == true
 }
 
-private let happSeen = OSAllocatedUnfairLock(initialState: (at: Date.distantPast, names: Set<String>()))
+private var happName: String { UserDefaults.standard.string(forKey: "vpnName") ?? "happ" }
+private let happPids = OSAllocatedUnfairLock(initialState: (at: Date.distantPast, pids: [pid_t]()))
 
-/// Happ's tunnels that are up right now, as "utun6/198.18.0.1"; empty when Happ is not connected.
+/// The tunnels, as "utun6/198.18.0.1", that these processes hold and that are up, counting only processes
+/// that are Happ's at this instant (a process number can pass to another program).
+private func tunnelsHeld(byHapp pids: [pid_t]) -> Set<String> {
+    let held = Set(pids.filter { pid in
+        var path = [CChar](repeating: 0, count: 4096)
+        return proc_pidpath(pid, &path, UInt32(path.count)) > 0 && inApp(String(cString: path), named: happName)
+    }.flatMap { tunnelsHeld(by: $0) })
+    return tunnels().filter { held.contains(String($0.prefix { $0 != "/" })) }
+}
+
+/// Happ's tunnels that are up right now; empty when Happ is not connected.
 /// A tunnel is Happ's when a process of the Happ app holds it. No other tunnel counts, so WARP's is never taken
-/// for Happ's. Takes a process scan (5–10 ms): not for the gate's queue, which reads `Vpn.tunnelsNow()`.
+/// for Happ's. Takes a process scan (5–10 ms): not for the gate's queue, which uses `Vpn.tunnelsNow()`.
 // ponytail: only Happ by default. `defaults write local.zaslon vpnName <name>` watches another client by its app's
 // name; give such clients their own switch position when someone asks.
 // ponytail: a build of Happ that keeps its tunnel in a root helper cannot be read and stays "not connected".
 func happTunnels(_ procs: [Proc]? = nil) -> Set<String> {
-    let name = UserDefaults.standard.string(forKey: "vpnName") ?? "happ"
-    let held = Set((procs ?? listProcs()).filter { inApp($0.origin, named: name) || inApp($0.path, named: name) }.flatMap { tunnelsHeld(by: $0.pid) })
-    let nets = tunnels().filter { held.contains(String($0.prefix { $0 != "/" })) }
-    let seen = (at: Date(), names: Set(nets.map { String($0.prefix { $0 != "/" }) }))
-    happSeen.withLock { $0 = seen }
-    return nets
+    let seen = (at: Date(), pids: (procs ?? listProcs()).filter { inApp($0.path, named: happName) }.map(\.pid))
+    happPids.withLock { $0 = seen }
+    return tunnelsHeld(byHapp: seen.pids)
 }
 
 /// `Zaslon --vpn`: which VPN is watched and what Zaslon sees of it. For a first look on a new Mac.
