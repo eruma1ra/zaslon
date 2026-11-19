@@ -28,12 +28,14 @@ final class Tunnel {
     func open(_ host: String, _ port: NWEndpoint.Port, then: @escaping (NWConnection?) -> Void) {
         guard let tunnel = interface else { return then(nil) }
         if IPv4Address(host) != nil || IPv6Address(host) != nil { return connect(host, port, tunnel, then) }
-        if let hit = cache[host], hit.until > Date() { return connect(hit.address, port, tunnel, then) }
+        // An address is remembered for the VPN and tunnel it was asked through: after a change of VPN it is asked again.
+        let key = "\(Vpn.current.rawValue) \(tunnel.name) \(host)"
+        if let hit = cache[key], hit.until > Date() { return connect(hit.address, port, tunnel, then) }
         lookups.async {
             let address = realAddress(host)
             self.queue.async {
                 guard let address else { return then(nil) }
-                self.cache[host] = (address, Date().addingTimeInterval(60))
+                self.cache[key] = (address, Date().addingTimeInterval(60))
                 self.connect(address, port, tunnel, then)
             }
         }
