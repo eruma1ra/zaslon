@@ -61,4 +61,7 @@ if [ "$1" = dmg ]; then
     hdiutil create -quiet -volname Zaslon -srcfolder build/dmg -ov -format UDZO build/Zaslon-1.1.0.dmg
     rm -rf build/dmg
     echo "built build/Zaslon-1.1.0.dmg"
+    # What the app's own updater reads: attach it to the release next to the disk image.
+    printf '{"version": "1.1.0", "image": "https://github.com/eruma1ra/zaslon/releases/download/v1.1.0/Zaslon-1.1.0.dmg", "sha256": "%s"}\n' "$(shasum -a 256 build/Zaslon-1.1.0.dmg | cut -d' ' -f1)" > build/update.json
+    echo "built build/update.json"
 fi

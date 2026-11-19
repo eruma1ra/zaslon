@@ -181,7 +181,7 @@ final class Guard: ObservableObject {
         self.wire = wire
         monitor.pathUpdateHandler = { [weak self] _ in DispatchQueue.main.async { self?.check() } }
         monitor.start(queue: .global())
-        Main.settle = { [weak self] in self?.settle() }
+        Updater.shared.hold = { [weak self] in self?.holdAll() }
         apply() // freeze first, ask second
         check()
     }
@@ -205,7 +205,6 @@ final class Guard: ObservableObject {
                 self.checking = false
                 if ok { self.learn(nets) }
                 if let procs { self.update(ok, procs) } // nil: still connected, nothing to do
-                Main.succeed() // this copy watches now; an older one that waited for that may leave
             }
         }
     }
@@ -269,19 +268,16 @@ final class Guard: ObservableObject {
         frozen = []
     }
 
-    /// This copy is now the only one. While two copies ran, the older one may have stopped processes after this one
-    /// let them go, or the other way round. So everything on the list counts as possibly stopped, and the state
-    /// this copy knows is applied afresh: stop signals if the VPN is down, continue signals if it is up.
-    func settle() {
-        if live { // first the journal: what the older copy wrote on its way out, then what this copy held back meanwhile
-            Journal.shared.reload(connected: protected == true)
-            Main.holder = true // merged: from here this copy writes the file
-            Journal.shared.store(wait: false)
-        }
+    /// Stops everything on the list and leaves it stopped, for a restart of Zaslon itself: while no copy is
+    /// running nobody would notice a drop, so the apps wait. The next copy freezes first anyway and thaws them
+    /// with its first "connected" answer.
+    func holdAll() {
         let procs = list()
-        for e in entries { frozen.formUnion(tree(of: e, in: procs)) }
-        frozen.remove(getpid())
-        apply(procs)
+        var all = Set<pid_t>()
+        for e in entries where e.off != true { all.formUnion(tree(of: e, in: procs)) }
+        all.remove(getpid())
+        for pid in all { signal(pid, SIGSTOP) }
+        frozen = all
     }
 }
 
@@ -434,71 +430,26 @@ func selftest() {
     precondition(read.map(\.cut) == [true, nil] && abs(read[1].end!.timeIntervalSince(t0 - 59.6)) < 0.001, "an outage left open by a quit is read back as cut short; one under a second keeps its length")
     precondition(Journal.span(read[0]).hasSuffix("– ?") && !Journal.span(read[1]).hasSuffix("?"))
     precondition(Journal.facts(kept.outages[0]) == ["Заморожено: Claude"] && Journal.facts(Outage(start: t0, off: true)) == ["Защита была выключена"], "what was frozen is shown even if the outage began with protection off")
-    // A hand-over: what the older copy wrote after this copy had read the file is taken in, once.
-    let later = Journal(file: journalFile)
-    kept.outages.insert(Outage(start: t0 + 500, end: t0 + 520, frozen: ["ChatGPT"]), at: 0)
-    kept.store(wait: true)
-    later.reload(connected: true); later.reload(connected: true)
-    precondition(later.outages.count == 3 && later.outages[0].frozen == ["ChatGPT"], "the journal takes in an older copy's last entries")
-    // The older copy left mid-outage: the new copy, itself in that outage, goes on with one entry.
-    kept.outages = [Outage(start: t0 + 900, frozen: ["Claude"], refused: 2)]
-    kept.store(wait: true)
-    let heir = Journal(file: nil)
-    heir.mark(connected: false, at: t0 + 901); heir.froze(["ChatGPT"]); heir.refuse()
-    let inherited = Journal(file: journalFile, open: heir.outages)
-    inherited.reload(connected: false)
-    precondition(inherited.outages.count == 1 && inherited.outages[0].start == t0 + 900 && inherited.outages[0].end == nil
-        && inherited.outages[0].frozen == ["Claude", "ChatGPT"] && inherited.outages[0].refused == 3, "an outage in progress is carried over as one entry")
-    // The new copy read the file while the older copy still had the outage open, and closed its own reading of
-    // it as cut short. The older copy's last word on that outage wins.
-    kept.outages = [Outage(start: t0 + 2000, frozen: ["Claude"])]
-    kept.store(wait: true)
-    let early = Journal(file: journalFile)
-    precondition(early.outages[0].cut == true)
-    kept.outages[0].end = t0 + 2030
-    kept.outages[0].refused = 4
-    kept.store(wait: true)
-    early.reload(connected: true)
-    precondition(early.outages.count == 1 && early.outages[0].cut == nil && early.outages[0].refused == 4, "the older copy's version of a shared entry replaces the cut one")
     try? FileManager.default.removeItem(atPath: journalFile)
-    // A copy that started during the outage has no entry of its own: the inherited one stays open until the VPN is back.
-    kept.outages = [Outage(start: t0 + 3000, frozen: ["Claude"])]
-    kept.store(wait: true)
-    let newcomer = Journal(file: journalFile, open: [])
-    newcomer.reload(connected: false)
-    precondition(newcomer.outages.count == 1 && newcomer.outages[0].end == nil, "an inherited outage stays open while the VPN is down")
-    newcomer.mark(connected: true, at: t0 + 3040)
-    precondition(newcomer.outages[0].end == t0 + 3040, "and closes when the VPN returns")
-    try? FileManager.default.removeItem(atPath: journalFile)
-    // Only the copy that holds the lock writes the file; the other keeps its changes until it is the holder.
-    var owns = false
-    let waiting = Journal(file: journalFile, open: [], mayWrite: { owns })
-    waiting.outages = [Outage(start: t0 + 4000, end: t0 + 4010)]
-    waiting.store(wait: true)
-    precondition(!FileManager.default.fileExists(atPath: journalFile), "a copy that is not the holder writes nothing")
-    owns = true
-    waiting.store(wait: true)
-    precondition(Journal(file: journalFile).outages.count == 1, "and writes what it kept once it is")
-    try? FileManager.default.removeItem(atPath: journalFile)
-    // After a hand-over the remaining copy applies its state to everything on the list, whoever stopped it.
-    var settled: [pid_t: Int32] = [:]
-    let sole = Guard(entries: [Entry(name: "A", matches: ["a"])], live: false)
-    sole.list = { [Proc(pid: 601, ppid: 1, path: "/x/a", origin: ""), Proc(pid: 602, ppid: 601, path: "/x/child", origin: "")] }
-    sole.signal = { settled[$0] = $1 }
-    sole.update(true)
-    settled = [:]
-    sole.settle()
-    precondition(settled == [601: SIGCONT, 602: SIGCONT], "with the VPN up, everything on the list is let go")
-    sole.update(false)
-    settled = [:]
-    sole.settle()
-    precondition(settled == [601: SIGSTOP, 602: SIGSTOP], "with the VPN down, everything on the list is stopped")
+    // A restart of Zaslon itself: everything on the list that is protected is stopped and stays stopped.
+    var held: [pid_t: Int32] = [:]
+    let holder = Guard(entries: [Entry(name: "A", matches: ["a"]), Entry(name: "B", matches: ["b"], off: true)], live: false)
+    holder.list = { [Proc(pid: 501, ppid: 1, path: "/x/a", origin: ""), Proc(pid: 502, ppid: 501, path: "/x/child", origin: ""), Proc(pid: 503, ppid: 1, path: "/x/b", origin: "")] }
+    holder.signal = { held[$0] = $1 }
+    holder.update(true)
+    held = [:]
+    holder.holdAll()
+    precondition(held == [501: SIGSTOP, 502: SIGSTOP], "a hold stops the protected trees and nothing else")
     // Updates: versions compare as numbers, and a release counts only with a disk image and its SHA-256.
     precondition(Updater.newer("1.10.0", than: "1.9.3") && Updater.newer("1.2", than: "1.1.9") && !Updater.newer("1.2.0", than: "1.2") && !Updater.newer("1.1.0", than: "1.2.0"), "versions compare number by number")
-    let feed = { (asset: String) in Data(#"{"tag_name":"v1.2.0","assets":[\#(asset)]}"#.utf8) }
-    let good = try? Updater.latest(feed(#"{"name":"Zaslon-1.2.0.dmg","browser_download_url":"https://example.com/z.dmg","digest":"sha256:ab12"}"#))
-    precondition(good == Release(version: "1.2.0", image: URL(string: "https://example.com/z.dmg")!, sha256: "ab12"), "a release is read from GitHub's answer")
-    precondition((try? Updater.latest(feed(#"{"name":"Zaslon-1.2.0.dmg","browser_download_url":"https://example.com/z.dmg"}"#))) == nil && (try? Updater.latest(Data("{}".utf8))) == nil, "no SHA-256, or no release: nothing to install")
+    let sum = String(repeating: "ab", count: 32)
+    let web = URL(string: "https://github.com/eruma1ra/zaslon/releases/latest/download/update.json")!
+    let described = { (image: String, sha: String) in Data(#"{"version":"1.2.0","image":"\#(image)","sha256":"\#(sha)"}"#.utf8) }
+    let good = try? Updater.latest(described("https://github.com/eruma1ra/zaslon/releases/download/v1.2.0/Zaslon-1.2.0.dmg", sum), from: web)
+    precondition(good == Release(version: "1.2.0", image: URL(string: "https://github.com/eruma1ra/zaslon/releases/download/v1.2.0/Zaslon-1.2.0.dmg")!, sha256: sum), "a release is read from its description")
+    precondition((try? Updater.latest(described("https://example.com/Zaslon.dmg", sum), from: web)) == nil, "an image on another host is refused")
+    precondition((try? Updater.latest(described("http://github.com/Zaslon.dmg", sum), from: web)) == nil && (try? Updater.latest(described("https://github.com/z.dmg", "ab12"), from: web)) == nil
+        && (try? Updater.latest(Data("{}".utf8), from: web)) == nil, "no https, no full SHA-256, or no description: nothing to install")
     // The very lines that will run with admin rights, here without them and in a scratch folder.
     let folder = NSTemporaryDirectory() + "zaslon-rule-test"
     try? FileManager.default.removeItem(atPath: folder)

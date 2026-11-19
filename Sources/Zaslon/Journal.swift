@@ -14,20 +14,16 @@ struct Outage: Codable, Identifiable, Equatable {
 /// The record of outages: when the VPN was gone, what was frozen, how many connections the gate refused.
 /// Kept in a small file so it survives a restart. Used on the main thread.
 final class Journal: ObservableObject {
-    static let shared = Journal(file: NSHomeDirectory() + "/Library/Application Support/Zaslon/journal.json", mayWrite: { Main.holder })
+    static let shared = Journal(file: NSHomeDirectory() + "/Library/Application Support/Zaslon/journal.json")
 
     @Published var outages: [Outage] = [] // newest first
     private let file: String?
-    private let mayWrite: () -> Bool
     private var saving = false
     private static let disk = DispatchQueue(label: "zaslon.journal") // one writer, so files land in the order they were made
 
-    /// `file: nil` keeps the journal in memory only (tests). `open` starts from these entries and does not read the file (tests).
-    /// `mayWrite` says whether this process is the one that writes the file now (the tray copy that holds the lock).
-    init(file: String?, open: [Outage]? = nil, mayWrite: @escaping () -> Bool = { true }) {
+    /// `file: nil` keeps the journal in memory only (tests).
+    init(file: String?) {
         self.file = file
-        self.mayWrite = mayWrite
-        if let open { outages = open; return }
         guard let file, let saved = FileManager.default.contents(atPath: file).flatMap({ try? Self.coder.1.decode([Outage].self, from: $0) }) else { return }
         // An outage left open by a crash or a quit: when it ended is not known. It is closed and marked as cut short.
         outages = saved.map { o in
@@ -42,37 +38,6 @@ final class Journal: ObservableObject {
         (to.dateEncodingStrategy, from.dateDecodingStrategy) = (.secondsSince1970, .secondsSince1970) // keeps fractions of a second
         return (to, from)
     }()
-
-    /// Reads the file again and adds the outages that are not here yet. After a hand-over the older copy's last
-    /// entries are in the file, not in this copy's memory.
-    func reload(connected: Bool) {
-        guard let file, let saved = FileManager.default.contents(atPath: file).flatMap({ try? Self.coder.1.decode([Outage].self, from: $0) }) else { return }
-        // An entry this copy read while the older copy still had it open was closed here as cut short. The older
-        // copy has since written how it really went: its version replaces ours.
-        let cut = Set(outages.filter { $0.cut == true }.map(\.id))
-        let better = Set(saved.filter { cut.contains($0.id) && $0.cut != true }.map(\.id))
-        outages.removeAll { better.contains($0.id) }
-        let known = Set(outages.map(\.id))
-        var missing = saved.filter { !known.contains($0.id) }
-        // The older copy left in the middle of an outage. That is the stretch this copy is in too: one entry goes
-        // on, with the older start and both copies' facts. If this copy has none open because it started during
-        // the outage, the older entry simply stays open until this copy sees the VPN return. Only if the VPN is
-        // back for this copy did the stretch end while the copies changed places.
-        if let i = missing.firstIndex(where: { $0.end == nil }) {
-            var older = missing.remove(at: i)
-            if outages.first?.end == nil, !outages.isEmpty {
-                let mine = outages.removeFirst()
-                older.frozen += mine.frozen.filter { !older.frozen.contains($0) }
-                older.refused += mine.refused
-            } else if connected {
-                older.end = Date()
-            }
-            missing.append(older)
-        }
-        guard !missing.isEmpty else { return }
-        outages = Array((outages + missing).sorted { $0.start > $1.start }.prefix(50))
-        save()
-    }
 
     /// The VPN went away (`connected: false`) or came back.
     func mark(connected: Bool, off: Bool = false, at time: Date = Date()) {
@@ -119,7 +84,7 @@ final class Journal: ObservableObject {
 
     /// Writes the file. `wait: true` returns only when it is on disk (tests).
     func store(wait: Bool) {
-        guard mayWrite(), let file, let data = try? Self.coder.0.encode(outages) else { return }
+        guard let file, let data = try? Self.coder.0.encode(outages) else { return }
         let write = {
             try? FileManager.default.createDirectory(atPath: (file as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
             try? data.write(to: URL(fileURLWithPath: file), options: .atomic)
