@@ -144,7 +144,7 @@ Controls:
 - **×**: removes the app from the list. For ChatGPT and Claude this also removes the gate rule and asks for the password again.
 - **+ Add**: add an app from a searchable list of everything installed. Adding ChatGPT or Claude asks for the admin password; if you refuse, the app is not added.
 - **Clock**: the journal of outages (below).
-- **Gear**: settings. **Launch at login**, and **Language**: English or Russian. Zaslon starts in the system's language.
+- **Gear**: the settings, shown in place of the list like the journal. **Launch at login**, and **Language**: English or Russian. Zaslon starts in the system's language.
 - **Quit**.
 
 ## The journal
