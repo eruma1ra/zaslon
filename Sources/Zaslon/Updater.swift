@@ -190,21 +190,21 @@ final class Updater: ObservableObject {
         guard run("/usr/bin/hdiutil", ["attach", image.path, "-nobrowse", "-readonly", "-mountpoint", mount.path]) == 0 else { throw UpdateError("the disk image does not open") }
         defer { run("/usr/bin/hdiutil", ["detach", mount.path, "-force"]) }
 
-        // Staged next to the installed app, so the swap stays on one volume.
-        let staged = bundle.deletingLastPathComponent().appendingPathComponent(".Zaslon-update-\(UUID().uuidString).app") // a name of its own: two updates never share it
+        // Staged next to the installed app, so the swap stays on one volume, under a name of its own, so two updates
+        // never share it. Whatever goes wrong from here on, the staged copy is removed.
+        let staged = bundle.deletingLastPathComponent().appendingPathComponent(".Zaslon-update-\(UUID().uuidString).app")
+        var placed = false
+        defer { if !placed { try? files.removeItem(at: staged) } }
         do { try files.copyItem(at: mount.appendingPathComponent("Zaslon.app"), to: staged) } catch { throw UpdateError("cannot write next to the app: \(error.localizedDescription)") }
         run("/usr/bin/xattr", ["-dr", "com.apple.quarantine", staged.path])
         let info = NSDictionary(contentsOf: staged.appendingPathComponent("Contents/Info.plist"))
         guard info?["CFBundleIdentifier"] as? String == "local.zaslon", info?["CFBundleShortVersionString"] as? String == release.version,
               run("/usr/bin/codesign", ["--verify", "--deep", "--strict", staged.path]) == 0 else {
-            try? files.removeItem(at: staged)
             throw UpdateError("the app in the image is not Zaslon \(release.version) with an intact signature")
         }
-        guard proceed() else {
-            try? files.removeItem(at: staged)
-            throw UpdateError("updates were switched off")
-        }
+        guard proceed() else { throw UpdateError("updates were switched off") }
         _ = try files.replaceItemAt(bundle, withItemAt: staged)
+        placed = true
     }
 
     /// The whole update of one bundle, in the open, for `Zaslon --update <app> [feed]`. Returns the exit code.
