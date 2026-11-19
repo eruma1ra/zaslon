@@ -44,6 +44,11 @@ final class Journal: ObservableObject {
     /// entries are in the file, not in this copy's memory.
     func reload() {
         guard let file, let saved = FileManager.default.contents(atPath: file).flatMap({ try? Self.coder.1.decode([Outage].self, from: $0) }) else { return }
+        // An entry this copy read while the older copy still had it open was closed here as cut short. The older
+        // copy has since written how it really went: its version replaces ours.
+        let cut = Set(outages.filter { $0.cut == true }.map(\.id))
+        let better = Set(saved.filter { cut.contains($0.id) && $0.cut != true }.map(\.id))
+        outages.removeAll { better.contains($0.id) }
         let known = Set(outages.map(\.id))
         var missing = saved.filter { !known.contains($0.id) }
         // The older copy left in the middle of an outage. That is the stretch this copy is in too: one entry goes

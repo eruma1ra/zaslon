@@ -181,6 +181,7 @@ final class Guard: ObservableObject {
         self.wire = wire
         monitor.pathUpdateHandler = { [weak self] _ in DispatchQueue.main.async { self?.check() } }
         monitor.start(queue: .global())
+        Main.settle = { [weak self] in self?.settle() }
         apply() // freeze first, ask second
         check()
     }
@@ -266,6 +267,16 @@ final class Guard: ObservableObject {
     func thawAll() {
         for pid in frozen { signal(pid, SIGCONT) }
         frozen = []
+    }
+
+    /// This copy is now the only one. While two copies ran, the older one may have stopped processes after this one
+    /// let them go, or the other way round. So everything on the list counts as possibly stopped, and the state
+    /// this copy knows is applied afresh: stop signals if the VPN is down, continue signals if it is up.
+    func settle() {
+        let procs = list()
+        for e in entries { frozen.formUnion(tree(of: e, in: procs)) }
+        frozen.remove(getpid())
+        apply(procs)
     }
 }
 
@@ -433,7 +444,31 @@ func selftest() {
     inherited.reload()
     precondition(inherited.outages.count == 1 && inherited.outages[0].start == t0 + 900 && inherited.outages[0].end == nil
         && inherited.outages[0].frozen == ["Claude", "ChatGPT"] && inherited.outages[0].refused == 3, "an outage in progress is carried over as one entry")
+    // The new copy read the file while the older copy still had the outage open, and closed its own reading of
+    // it as cut short. The older copy's last word on that outage wins.
+    kept.outages = [Outage(start: t0 + 2000, frozen: ["Claude"])]
+    kept.store(wait: true)
+    let early = Journal(file: journalFile)
+    precondition(early.outages[0].cut == true)
+    kept.outages[0].end = t0 + 2030
+    kept.outages[0].refused = 4
+    kept.store(wait: true)
+    early.reload()
+    precondition(early.outages.count == 1 && early.outages[0].cut == nil && early.outages[0].refused == 4, "the older copy's version of a shared entry replaces the cut one")
     try? FileManager.default.removeItem(atPath: journalFile)
+    // After a hand-over the remaining copy applies its state to everything on the list, whoever stopped it.
+    var settled: [pid_t: Int32] = [:]
+    let sole = Guard(entries: [Entry(name: "A", matches: ["a"])], live: false)
+    sole.list = { [Proc(pid: 601, ppid: 1, path: "/x/a", origin: ""), Proc(pid: 602, ppid: 601, path: "/x/child", origin: "")] }
+    sole.signal = { settled[$0] = $1 }
+    sole.update(true)
+    settled = [:]
+    sole.settle()
+    precondition(settled == [601: SIGCONT, 602: SIGCONT], "with the VPN up, everything on the list is let go")
+    sole.update(false)
+    settled = [:]
+    sole.settle()
+    precondition(settled == [601: SIGSTOP, 602: SIGSTOP], "with the VPN down, everything on the list is stopped")
     // Updates: versions compare as numbers, and a release counts only with a disk image and its SHA-256.
     precondition(Updater.newer("1.10.0", than: "1.9.3") && Updater.newer("1.2", than: "1.1.9") && !Updater.newer("1.2.0", than: "1.2") && !Updater.newer("1.1.0", than: "1.2.0"), "versions compare number by number")
     let feed = { (asset: String) in Data(#"{"tag_name":"v1.2.0","assets":[\#(asset)]}"#.utf8) }

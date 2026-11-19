@@ -64,6 +64,8 @@ enum Main {
     }
 
     private static var predecessor: (pid: pid_t, lock: Int32)?
+    /// Applies the guard's state afresh once this copy is the only one. Set by the guard.
+    static var settle: () -> Void = {}
 
     /// The descriptor stays open for the life of the process: that is what holds the lock.
     private static func claim(_ lock: Int32) {
@@ -92,7 +94,10 @@ enum Main {
             }
             claim(old.lock)
             // The older copy wrote its journal on the way out: take in what it saw after this copy had read the file.
-            DispatchQueue.main.async { Journal.shared.reload() }
+            DispatchQueue.main.async {
+                Journal.shared.reload()
+                settle()
+            }
         }
     }
 }
