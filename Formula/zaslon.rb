@@ -5,8 +5,8 @@
 class Zaslon < Formula
   desc "VPN kill switch for AI apps: ChatGPT and Claude only through the VPN tunnel"
   homepage "https://github.com/eruma1ra/zaslon"
-  url "https://github.com/eruma1ra/zaslon/archive/refs/tags/v1.3.0.tar.gz"
-  sha256 "f3ce544ae4ecfd14b00adf537e2030f60985c082612f79ffd5e8bc3126d0a953"
+  url "https://github.com/eruma1ra/zaslon/archive/refs/tags/v1.3.1.tar.gz"
+  sha256 "7601a7a3375f5726131ae6a7fdaaf4bcd0305a7a7eaf5c539265db6e6ce94f4a"
   license "MIT"
   head "https://github.com/eruma1ra/zaslon.git", branch: "main"
 
