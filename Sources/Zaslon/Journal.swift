@@ -141,7 +141,7 @@ struct JournalView: View {
     @ObservedObject var journal: Journal
     @ObservedObject var lang = Lang.shared
     let close: () -> Void
-    @State private var copied = false
+    @Local private var copied = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {

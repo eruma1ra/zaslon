@@ -610,7 +610,7 @@ struct Chip: ViewModifier {
     static var showHover = false // HOVER=1 in the test window, to take a picture of the hover look
     var rest = 0.0 // fill while the mouse is away
     var outline = 0.0 // border
-    @State private var hover = false
+    @Local private var hover = false
 
     func body(content: Content) -> some View {
         content
@@ -639,8 +639,8 @@ struct StatusPill: View {
 /// squeezes it; the shield redraws itself into the crossed-out one; switching on sends one ring outward.
 struct ShieldButton: View {
     @ObservedObject var g: Guard
-    @State private var hover = false
-    @State private var rings = 0 // goes up on every switch-on and starts the ring
+    @Local private var hover = false
+    @Local private var rings = 0 // goes up on every switch-on and starts the ring
 
     private struct Ring {
         var scale = 1.0
@@ -692,7 +692,7 @@ struct ShieldButton: View {
 struct QuitButton: View {
     let action: () -> Void
     @ObservedObject private var lang = Lang.shared
-    @State private var hover = false
+    @Local private var hover = false
 
     var body: some View {
         Button(action: action) {
@@ -704,7 +704,7 @@ struct QuitButton: View {
 
 struct RemoveButton: View {
     let action: () -> Void
-    @State private var hover = false
+    @Local private var hover = false
 
     var body: some View {
         Button(action: action) {
@@ -724,8 +724,8 @@ struct Panel: View {
     @ObservedObject var catalog: Catalog
     @ObservedObject var gate = Gate.shared
     @ObservedObject var lang = Lang.shared // every string below is read again when the language changes
-    @State private var settings = ProcessInfo.processInfo.environment["GEAR"] != nil // GEAR=1: open in the test window
-    @State private var journal = ProcessInfo.processInfo.environment["LOG"] != nil // LOG=1: open in the test window
+    @Local private var settings = ProcessInfo.processInfo.environment["GEAR"] != nil // GEAR=1: open in the test window
+    @Local private var journal = ProcessInfo.processInfo.environment["LOG"] != nil // LOG=1: open in the test window
     @FocusState private var searching: Bool
 
     init(g: Guard, catalog: Catalog = .shared) {
