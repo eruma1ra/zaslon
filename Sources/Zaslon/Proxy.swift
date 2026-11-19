@@ -19,7 +19,7 @@ final class Tunnel {
     /// The VPN tunnel right now, asked afresh for every connection: the utun that is up and holds an IPv4 address
     /// (the system's own utuns have neither). nil when there is no such tunnel.
     var interface: NWInterface? {
-        let names = pinned.map { [$0] } ?? tunnels().map { String($0.prefix { $0 != "/" }) }
+        let names = pinned.map { [$0] } ?? Vpn.tunnelsNow().map { String($0.prefix { $0 != "/" }) }
         return monitor.currentPath.availableInterfaces.first { names.contains($0.name) }
     }
 
