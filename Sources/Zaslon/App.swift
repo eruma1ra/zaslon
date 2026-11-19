@@ -39,18 +39,6 @@ enum Main {
             CFRunLoopRun()
         }
         onlyOne()
-        // A version downloaded earlier is put in place now, before anything is watched, and Zaslon starts once more
-        // from the new files. This is the only moment an update touches the app.
-        if Updater.pending {
-            // The swap and the second start put off the moment the guard begins by a few seconds. The apps on the
-            // list wait stopped for it: the guard that comes up freezes first anyway and lets them go with its
-            // first "connected" answer. If nothing gets applied after all, the guard of this very start does that.
-            Guard.hold(Guard.saved ?? Entry.defaults)
-            if Updater.applyAtStart() {
-                relaunchSoon()
-                exit(0)
-            }
-        }
         ZaslonApp.main()
     }
 
@@ -254,8 +242,13 @@ func watchStalls() {
 final class Delegate: NSObject, NSApplicationDelegate {
     private var asked: DispatchSourceSignal?
 
-    /// Quit from the menu or at logout: the journal's last changes go to disk first.
-    func applicationWillTerminate(_: Notification) { Journal.shared.store(wait: true) }
+    /// Quit from the menu or at logout: the journal's last changes go to disk, and a downloaded version in place.
+    func applicationWillTerminate(_: Notification) {
+        Journal.shared.store(wait: true)
+        // Zaslon is closing anyway (Quit, logout, shutdown): the one moment a downloaded version can take the
+        // app's place without interrupting anything. The next start is simply the new version.
+        Updater.applyAtQuit()
+    }
 
     func applicationDidFinishLaunching(_: Notification) {
         // Asked to stop by a signal (a newer copy taking over, `kill`): the same, then leave with an error code, so
@@ -772,15 +765,6 @@ struct SettingsView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(t("Обновлять автоматически", "Update automatically")).font(.system(size: 13))
                     Text(updater.status).font(.system(size: 12)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                    // A downloaded version waits for the next start of Zaslon; this starts it now.
-                    if case .ready = updater.step {
-                        Button { updater.restart() } label: {
-                            Text(t("Перезапустить Zaslon", "Restart Zaslon")).font(.system(size: 11, weight: .medium))
-                                .padding(.horizontal, 8).padding(.vertical, 3).modifier(Chip(rest: 0.07, outline: 0.15))
-                        }
-                        .buttonStyle(.plain).padding(.top, 3)
-                        .help(t("Программы из списка встанут на паузу на несколько секунд", "The apps on the list are paused for a few seconds"))
-                    }
                 }
                 Spacer()
                 // Under Homebrew the formula owns the app: no switch, the line above says how to update.

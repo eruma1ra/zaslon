@@ -15,17 +15,17 @@ struct UpdateError: Error, CustomStringConvertible {
 
 /// Updates Zaslon from the latest release on GitHub, for those who switched that on in the settings.
 ///
-/// Two halves, and the running app is never replaced under itself:
-/// 1. While Zaslon runs: once a day, and only while the VPN is up, it asks GitHub for the latest release. A newer
-///    one is downloaded, checked and set aside in Zaslon's own folder. Nothing else changes.
-/// 2. When Zaslon starts: a version set aside is put in place of the app, and Zaslon starts once more from it. At
-///    that moment it is not watching anything yet, so the swap interrupts no protection.
-/// So an update takes effect at the next start of Zaslon: at login, or when the user presses "Restart" in the
-/// settings. The list, the gate rules and the journal live outside the app bundle and stay as they are.
+/// Two halves, and neither touches the watch over the VPN:
+/// 1. While Zaslon runs: once a day, and only while the VPN is up, it asks for the latest release. A newer one is
+///    downloaded, checked and set aside in Zaslon's own folder. Nothing else changes.
+/// 2. When Zaslon quits (Quit, logout, shutdown): a version set aside takes the app's place. Zaslon is closing
+///    anyway, so nothing is interrupted, and the next start is simply the new version.
+/// Zaslon never restarts itself for an update: a restart is seconds without a watch, and no update is worth that.
+/// The list, the gate rules and the journal live outside the app bundle and stay as they are.
 ///
 /// There is no Apple Developer ID behind Zaslon, so the checks are these: the image must have the SHA-256 that
-/// the release states for it, and the app inside must be Zaslon, be the announced version and have an intact signature.
-/// Whoever controls the GitHub repository controls the update: that is the trust this switch asks for.
+/// the release states for it, and the app inside must be Zaslon, be the announced version and have an intact
+/// signature. Whoever controls the GitHub repository controls the update: that is the trust this switch asks for.
 final class Updater: ObservableObject {
     static let shared = Updater()
     /// A small file attached to every release; this address always leads to the latest one. A plain download, so
@@ -34,7 +34,7 @@ final class Updater: ObservableObject {
     /// Installed with Homebrew: the formula owns the app there, and `brew upgrade zaslon` updates it.
     static let brewed = Bundle.main.bundlePath.contains("/Cellar/")
     static var version: String { Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0" }
-    /// Where a downloaded and checked version waits for the next start.
+    /// Where a downloaded and checked version waits until Zaslon quits.
     static let shelf = URL(fileURLWithPath: NSHomeDirectory() + "/Library/Application Support/Zaslon/update")
 
     /// `waiting(nil)`: a check is due but the VPN is down, so it is not known yet whether there is anything newer.
@@ -46,8 +46,6 @@ final class Updater: ObservableObject {
     @Published var latest = false
     private var found: Release?
     private var busy = false
-    /// Stops the apps on the list before Zaslon restarts itself. Set by the guard.
-    var hold: () -> Void = {}
 
     func choose(_ on: Bool) {
         self.on = on
@@ -57,19 +55,19 @@ final class Updater: ObservableObject {
         try? FileManager.default.removeItem(at: Self.shelf) // switched off: a version set aside is not wanted either
     }
 
-    /// Checks at start and then every ten minutes; GitHub itself is asked once a day, the rest only waits for the VPN.
+    /// Checks at start and then every ten minutes; the release is asked for once a day, the rest only waits for the VPN.
     func watch() {
         if on, let waiting = Self.staged(in: Self.shelf), Self.newer(waiting, than: Self.version) { step = .ready(waiting) }
         check()
         RunLoop.main.add(Timer(timeInterval: 600, repeats: true) { [weak self] _ in self?.check() }, forMode: .common)
     }
 
-    /// One pass: ask GitHub if it is time, and set aside what is newer. Nothing goes out while the VPN is down.
+    /// One pass: ask for the latest release if it is time, and set aside what is newer. Nothing goes out while the
+    /// VPN is down.
     func check(force: Bool = false) {
         guard on, !Self.brewed, !busy else { return }
         let asked = UserDefaults.standard.object(forKey: "updateAsked") as? Date ?? .distantPast
         let (known, due) = (found, force || Date().timeIntervalSince(asked) > 86400)
-        let ready: String? = { if case .ready(let version) = step { return version } else { return nil } }()
         guard known != nil || due else { return }
         busy = true
         DispatchQueue.global(qos: .utility).async {
@@ -83,10 +81,11 @@ final class Updater: ObservableObject {
                         return
                     }
                     (self.step, self.latest, self.found) = (step, latest, release)
+                    // Whatever this pass ran into, a version that is set aside is still there, and the row says so.
+                    if let waiting = Self.staged(in: Self.shelf), Self.newer(waiting, than: Self.version) { self.step = .ready(waiting) }
                 }
             }
-            // Without the VPN nothing is asked; a version already set aside stays ready, with its Restart button.
-            guard warpConnected() else { return show(ready.map { .ready($0) } ?? .waiting(known?.version), false) }
+            guard warpConnected() else { return show(.waiting(known?.version), false) }
             do {
                 if due {
                     release = try Self.latest(Self.fetch(URL(string: Self.feed)!), from: URL(string: Self.feed)!)
@@ -108,22 +107,13 @@ final class Updater: ObservableObject {
         }
     }
 
-    /// The "Restart" button: Zaslon starts again, and the new start puts the version set aside in place. The apps
-    /// on the list are stopped first and stay stopped: for the seconds without a running copy nobody would notice
-    /// a drop. The next copy freezes first anyway and lets them go with its first "connected" answer.
-    func restart() {
-        hold()
-        relaunchSoon()
-        NSApp.terminate(nil)
-    }
-
     /// What the settings row says under its title.
     var status: String {
         let version = t("Версия ", "Version ") + Self.version
         if Self.brewed { return version + t(". Обновление: brew upgrade zaslon", ". Update with: brew upgrade zaslon") }
         switch step {
         case .downloading(let new): return t("Скачиваю ", "Downloading ") + new + "…"
-        case .ready(let new): return new + t(" скачана. Включится при следующем запуске Zaslon", " is downloaded. It takes effect the next time Zaslon starts")
+        case .ready(let new): return new + t(" скачана. Включится после перезапуска Zaslon", " is downloaded. It takes effect after Zaslon is restarted")
         case .waiting(let new?): return t("Есть ", "Found ") + new + t(", жду VPN", ", waiting for the VPN")
         case .waiting(nil): return version + t(", проверю, когда вернётся VPN", ", will check when the VPN is back")
         case .failed(let new): return version + t(". Не удалось скачать ", ". Could not download ") + new
@@ -139,17 +129,11 @@ final class Updater: ObservableObject {
         }
     }
 
-    /// Whether a version is set aside and may be put in place at this start. Cheap: looks at a folder and a setting.
-    static var pending: Bool {
-        !brewed && UserDefaults.standard.bool(forKey: "autoUpdate") && FileManager.default.fileExists(atPath: shelf.appendingPathComponent("Zaslon.app").path)
-    }
-
-    /// Called when Zaslon starts, before it watches anything: puts a version set aside earlier in place of the
-    /// app. True if it did, and the caller then starts Zaslon again from the new files.
-    static func applyAtStart() -> Bool {
-        guard pending, let new = try? apply(from: shelf, over: Bundle.main.bundleURL) else { return false }
+    /// Called when Zaslon quits: puts a version set aside earlier in place of the app. Not under Homebrew, and
+    /// not if updates were switched off since.
+    static func applyAtQuit() {
+        guard !brewed, UserDefaults.standard.bool(forKey: "autoUpdate"), let new = try? apply(from: shelf, over: Bundle.main.bundleURL) else { return }
         UserDefaults.standard.set(["version": new, "at": Date()], forKey: "updated")
-        return true
     }
 
     // MARK: the steps, usable on any bundle (`Zaslon --update <app> [feed]` runs them for a test)
@@ -251,20 +235,15 @@ final class Updater: ObservableObject {
     }
 
     /// Puts the version set aside in `shelf` in place of `bundle`, if it is sound and newer, and empties the shelf.
-    /// Returns the new version, or nil if there was nothing to do. The swap is one step: either the app is the
-    /// new one afterwards, or it is untouched.
+    /// Returns the new version, or nil if there was nothing to do. One step: afterwards the app is the new one,
+    /// or it is untouched.
     static func apply(from shelf: URL, over bundle: URL) throws -> String? {
         let files = FileManager.default
         guard files.fileExists(atPath: shelf.path) else { return nil }
         defer { try? files.removeItem(at: shelf) }
         let have = NSDictionary(contentsOf: bundle.appendingPathComponent("Contents/Info.plist"))?["CFBundleShortVersionString"] as? String ?? "0"
         guard let new = staged(in: shelf), newer(new, than: have) else { return nil }
-        // Copied next to the installed app first, so that the swap itself stays on one volume.
-        let near = bundle.deletingLastPathComponent().appendingPathComponent(".Zaslon-update-\(UUID().uuidString).app")
-        defer { try? files.removeItem(at: near) }
-        do { try files.copyItem(at: shelf.appendingPathComponent("Zaslon.app"), to: near) } catch { throw UpdateError("cannot write next to the app: \(error.localizedDescription)") }
-        guard sound(near) == new else { throw UpdateError("the copy next to the app is damaged") }
-        _ = try files.replaceItemAt(bundle, withItemAt: near)
+        _ = try files.replaceItemAt(bundle, withItemAt: shelf.appendingPathComponent("Zaslon.app"))
         return new
     }
 

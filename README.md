@@ -157,15 +157,14 @@ The journal holds the last 50 outages in `~/Library/Application Support/Zaslon/j
 
 ## Updates
 
-**Update automatically** in the settings is off until you switch it on. It works in two halves, and the running app is never replaced under itself:
+**Update automatically** in the settings is off until you switch it on. It works in two halves, and neither touches the watch over the VPN:
 
-1. **While Zaslon runs** it asks GitHub once a day for the latest release. A newer one is downloaded, checked and set aside. Nothing else changes: Zaslon keeps watching as before.
-2. **When Zaslon starts** the version set aside is put in place, and Zaslon starts once more from it. At that moment it is not watching anything yet, so the swap interrupts no protection.
+1. **While Zaslon runs** it asks once a day for the latest release. A newer one is downloaded, checked and set aside. Nothing else changes.
+2. **When Zaslon quits** (Quit, logout, shutdown) the version set aside takes the app's place. Zaslon is closing anyway, so nothing is interrupted, and the next start is simply the new version.
 
-So an update takes effect at the next start of Zaslon: at the next login, or at once with **Restart Zaslon**, which appears under the switch when a version is waiting. Your list, the gate rules and the journal are kept.
+Zaslon never restarts itself for an update: a restart is a few seconds without a watch, and no update is worth that. The line under the switch tells you when a version is waiting; to have it at once, quit Zaslon and open it again. Your list, the gate rules and the journal are kept.
 
 - **Nothing goes out while the VPN is down**, and Zaslon's own requests go through its tunnel proxy, so they cannot leave another way.
-- **Restart Zaslon** pauses the apps on the list for the few seconds it takes; ChatGPT and Claude cannot connect during them, and a request in flight at that moment is cut. Nothing leaves outside the VPN.
 - **What is checked.** Each release carries a small `update.json` with its version and the SHA-256 of its disk image. The image must have that SHA-256; the app inside must be Zaslon, be the announced version and have an intact signature. If any check fails, nothing is set aside and the installed app is not touched.
 - **What that means.** Zaslon has no Apple Developer ID, so the update is as trustworthy as this GitHub repository. Leave the switch off if you would rather read each release first.
 - **Homebrew installs have no switch**: the formula owns the app there. Use `brew update && brew upgrade zaslon`, then run `zaslon` once.
