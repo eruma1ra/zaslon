@@ -37,6 +37,8 @@ final class Updater: ObservableObject {
     /// The last check found nothing newer. Only then does the status say "the latest".
     @Published var latest = false
     private var found: Release?
+    /// Stops the apps on the list before Zaslon restarts itself. Set by the guard.
+    var hold: () -> Void = {}
     private var busy = false
 
     func choose(_ on: Bool) {
@@ -78,6 +80,9 @@ final class Updater: ObservableObject {
                 try Self.install(release, over: Bundle.main.bundleURL) { UserDefaults.standard.bool(forKey: "autoUpdate") }
                 DispatchQueue.main.async {
                     UserDefaults.standard.set(["version": release.version, "at": Date()], forKey: "updated")
+                    // For the seconds without a running copy nobody watches the VPN, so the apps wait frozen; the
+                    // new copy thaws them with its first "connected" answer.
+                    self.hold()
                     relaunchSoon()
                     NSApp.terminate(nil)
                 }
@@ -186,8 +191,7 @@ final class Updater: ObservableObject {
         defer { run("/usr/bin/hdiutil", ["detach", mount.path, "-force"]) }
 
         // Staged next to the installed app, so the swap stays on one volume.
-        let staged = bundle.deletingLastPathComponent().appendingPathComponent(".Zaslon-update.app")
-        try? files.removeItem(at: staged)
+        let staged = bundle.deletingLastPathComponent().appendingPathComponent(".Zaslon-update-\(UUID().uuidString).app") // a name of its own: two updates never share it
         do { try files.copyItem(at: mount.appendingPathComponent("Zaslon.app"), to: staged) } catch { throw UpdateError("cannot write next to the app: \(error.localizedDescription)") }
         run("/usr/bin/xattr", ["-dr", "com.apple.quarantine", staged.path])
         let info = NSDictionary(contentsOf: staged.appendingPathComponent("Contents/Info.plist"))
