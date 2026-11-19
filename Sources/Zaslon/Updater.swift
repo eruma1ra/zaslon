@@ -204,8 +204,8 @@ final class Updater: ObservableObject {
     /// The version set aside in `shelf`, if there is a sound one.
     static func staged(in shelf: URL) -> String? { sound(shelf.appendingPathComponent("Zaslon.app")) }
 
-    /// Downloads the release, checks it and sets its app aside in `shelf`, replacing whatever waited there. Throws
-    /// and leaves the shelf empty if a check fails. The installed app is not touched.
+    /// Downloads the release, checks it and sets its app aside in `shelf`, replacing whatever waited there. If a
+    /// check fails it throws and the shelf stays as it was. The installed app is not touched.
     static func stage(_ release: Release, in shelf: URL) throws {
         let files = FileManager.default
         let work = files.temporaryDirectory.appendingPathComponent("zaslon-update-\(UUID().uuidString)")
@@ -221,17 +221,17 @@ final class Updater: ObservableObject {
         guard run("/usr/bin/hdiutil", ["attach", image.path, "-nobrowse", "-readonly", "-mountpoint", mount.path]) == 0 else { throw UpdateError("the disk image does not open") }
         defer { run("/usr/bin/hdiutil", ["detach", mount.path, "-force"]) }
 
+        // Copied and checked under another name beside the shelf, and only then given the shelf's name in one
+        // step: a quit at any moment finds either a fully checked version there, or the previous state.
+        let incoming = shelf.deletingLastPathComponent().appendingPathComponent("update-incoming-\(UUID().uuidString)")
+        defer { try? files.removeItem(at: incoming) }
+        try files.createDirectory(at: incoming, withIntermediateDirectories: true)
+        let app = incoming.appendingPathComponent("Zaslon.app")
+        try files.copyItem(at: mount.appendingPathComponent("Zaslon.app"), to: app)
+        run("/usr/bin/xattr", ["-dr", "com.apple.quarantine", app.path])
+        guard sound(app) == release.version else { throw UpdateError("the app in the image is not Zaslon \(release.version) with an intact signature") }
         try? files.removeItem(at: shelf)
-        try files.createDirectory(at: shelf, withIntermediateDirectories: true)
-        let app = shelf.appendingPathComponent("Zaslon.app")
-        do {
-            try files.copyItem(at: mount.appendingPathComponent("Zaslon.app"), to: app)
-            run("/usr/bin/xattr", ["-dr", "com.apple.quarantine", app.path])
-            guard sound(app) == release.version else { throw UpdateError("the app in the image is not Zaslon \(release.version) with an intact signature") }
-        } catch {
-            try? files.removeItem(at: shelf)
-            throw error
-        }
+        try files.moveItem(at: incoming, to: shelf)
     }
 
     /// Puts the version set aside in `shelf` in place of `bundle`, if it is sound and newer, and empties the shelf.
