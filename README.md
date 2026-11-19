@@ -79,6 +79,8 @@ Domains behind the gate:
 
 Any app can be put on the list. When WARP is not connected, Zaslon sends `SIGSTOP` to the app's whole process tree: the app, its helpers, and everything they started (shells, `git`, MCP servers). A stopped process cannot send anything. When WARP is back, `SIGCONT` lets it continue from where it stopped. Nothing is killed and no work is lost.
 
+**One exception: a program that leads a job in a terminal** (an interactive `claude` or `codex` session) is not stopped. If it were, its shell would take the terminal back, and after `SIGCONT` the program's next read would fail and end the session. Everything it started is still stopped. Its own traffic to ChatGPT and Claude is behind the gate; any other traffic from it can leave during a drop. To pin that too, start it with the [tunnel proxy](#3-the-tunnel-proxy-for-anything-you-configure-yourself).
+
 How a drop is noticed:
 
 - **A tripwire, 20 times a second.** Zaslon remembers which tunnel interfaces existed while WARP said "Connected" and checks that they are still there. Reading this takes microseconds.
