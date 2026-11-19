@@ -14,16 +14,19 @@ struct Outage: Codable, Identifiable, Equatable {
 /// The record of outages: when the VPN was gone, what was frozen, how many connections the gate refused.
 /// Kept in a small file so it survives a restart. Used on the main thread.
 final class Journal: ObservableObject {
-    static let shared = Journal(file: NSHomeDirectory() + "/Library/Application Support/Zaslon/journal.json")
+    static let shared = Journal(file: NSHomeDirectory() + "/Library/Application Support/Zaslon/journal.json", mayWrite: { Main.holder })
 
     @Published var outages: [Outage] = [] // newest first
     private let file: String?
+    private let mayWrite: () -> Bool
     private var saving = false
     private static let disk = DispatchQueue(label: "zaslon.journal") // one writer, so files land in the order they were made
 
     /// `file: nil` keeps the journal in memory only (tests). `open` starts from these entries and does not read the file (tests).
-    init(file: String?, open: [Outage]? = nil) {
+    /// `mayWrite` says whether this process is the one that writes the file now (the tray copy that holds the lock).
+    init(file: String?, open: [Outage]? = nil, mayWrite: @escaping () -> Bool = { true }) {
         self.file = file
+        self.mayWrite = mayWrite
         if let open { outages = open; return }
         guard let file, let saved = FileManager.default.contents(atPath: file).flatMap({ try? Self.coder.1.decode([Outage].self, from: $0) }) else { return }
         // An outage left open by a crash or a quit: when it ended is not known. It is closed and marked as cut short.
@@ -116,7 +119,7 @@ final class Journal: ObservableObject {
 
     /// Writes the file. `wait: true` returns only when it is on disk (tests).
     func store(wait: Bool) {
-        guard let file, let data = try? Self.coder.0.encode(outages) else { return }
+        guard mayWrite(), let file, let data = try? Self.coder.0.encode(outages) else { return }
         let write = {
             try? FileManager.default.createDirectory(atPath: (file as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
             try? data.write(to: URL(fileURLWithPath: file), options: .atomic)

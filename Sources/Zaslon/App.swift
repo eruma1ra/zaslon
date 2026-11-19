@@ -67,8 +67,13 @@ enum Main {
     /// Takes over the journal and applies the guard's state afresh once this copy is the only one. Set by the guard.
     static var settle: () -> Void = {}
 
+    /// True once this copy holds the lock. Only the holder writes shared files (the journal): while two copies run
+    /// during a hand-over, the older one is still the holder and the new one keeps its changes in memory.
+    private(set) static var holder = false
+
     /// The descriptor stays open for the life of the process: that is what holds the lock.
     private static func claim(_ lock: Int32) {
+        holder = true
         ftruncate(lock, 0)
         let me = "\(getpid())\n"
         pwrite(lock, me, me.utf8.count, 0)

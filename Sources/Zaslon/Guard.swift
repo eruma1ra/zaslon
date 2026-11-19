@@ -273,7 +273,10 @@ final class Guard: ObservableObject {
     /// let them go, or the other way round. So everything on the list counts as possibly stopped, and the state
     /// this copy knows is applied afresh: stop signals if the VPN is down, continue signals if it is up.
     func settle() {
-        if live { Journal.shared.reload(connected: protected == true) } // first: what the older copy wrote on its way out
+        if live { // first the journal: what the older copy wrote on its way out, then what this copy held back meanwhile
+            Journal.shared.reload(connected: protected == true)
+            Journal.shared.store(wait: false)
+        }
         let procs = list()
         for e in entries { frozen.formUnion(tree(of: e, in: procs)) }
         frozen.remove(getpid())
@@ -465,6 +468,16 @@ func selftest() {
     precondition(newcomer.outages.count == 1 && newcomer.outages[0].end == nil, "an inherited outage stays open while the VPN is down")
     newcomer.mark(connected: true, at: t0 + 3040)
     precondition(newcomer.outages[0].end == t0 + 3040, "and closes when the VPN returns")
+    try? FileManager.default.removeItem(atPath: journalFile)
+    // Only the copy that holds the lock writes the file; the other keeps its changes until it is the holder.
+    var owns = false
+    let waiting = Journal(file: journalFile, open: [], mayWrite: { owns })
+    waiting.outages = [Outage(start: t0 + 4000, end: t0 + 4010)]
+    waiting.store(wait: true)
+    precondition(!FileManager.default.fileExists(atPath: journalFile), "a copy that is not the holder writes nothing")
+    owns = true
+    waiting.store(wait: true)
+    precondition(Journal(file: journalFile).outages.count == 1, "and writes what it kept once it is")
     try? FileManager.default.removeItem(atPath: journalFile)
     // After a hand-over the remaining copy applies its state to everything on the list, whoever stopped it.
     var settled: [pid_t: Int32] = [:]
