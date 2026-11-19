@@ -34,7 +34,9 @@ final class Tunnel {
         lookups.async {
             let address = realAddress(host)
             self.queue.async {
-                guard let address else { return then(nil) }
+                // The lookup took time. The tunnel is asked for again: after a drop or a change of VPN in the
+                // meantime this connection is refused, not opened through the tunnel that was there before.
+                guard let address, self.interface?.name == tunnel.name else { return then(nil) }
                 self.cache[key] = (address, Date().addingTimeInterval(60))
                 self.connect(address, port, tunnel, then)
             }
