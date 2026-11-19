@@ -275,6 +275,7 @@ final class Guard: ObservableObject {
     func settle() {
         if live { // first the journal: what the older copy wrote on its way out, then what this copy held back meanwhile
             Journal.shared.reload(connected: protected == true)
+            Main.holder = true // merged: from here this copy writes the file
             Journal.shared.store(wait: false)
         }
         let procs = list()
