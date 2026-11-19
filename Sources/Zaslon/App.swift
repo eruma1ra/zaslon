@@ -759,8 +759,11 @@ struct SettingsView: View {
                         chip(name, on: vpn == code) {
                             guard vpn != code else { return }
                             vpn = code
+                            let before = Vpn.current
                             Vpn.choose(code)
-                            g.trip() // freeze first; only an answer about the VPN now chosen thaws the list
+                            // A change of VPN freezes first; only an answer about the one now chosen thaws the list.
+                            // "Auto" to the VPN it already took (or back) changes nothing, so nothing is frozen.
+                            if Vpn.current != before { g.trip() }
                         }
                     }
                 }
