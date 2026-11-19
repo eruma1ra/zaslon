@@ -57,7 +57,12 @@ final class Updater: ObservableObject {
 
     /// Checks at start and then every ten minutes; the release is asked for once a day, the rest only waits for the VPN.
     func watch() {
-        if on, let waiting = Self.staged(in: Self.shelf), Self.newer(waiting, than: Self.version) { step = .ready(waiting) }
+        // Off the main thread: checking a signature takes a moment, and the main thread is where the guard acts.
+        DispatchQueue.global(qos: .utility).async {
+            Self.sweep()
+            let waiting = Self.waiting()
+            DispatchQueue.main.async { if self.on, let waiting, self.step == .idle { self.step = .ready(waiting) } }
+        }
         check()
         RunLoop.main.add(Timer(timeInterval: 600, repeats: true) { [weak self] _ in self?.check() }, forMode: .common)
     }
@@ -73,6 +78,7 @@ final class Updater: ObservableObject {
         DispatchQueue.global(qos: .utility).async {
             var release = known
             let show = { (step: Step, latest: Bool) in
+                let waiting = Self.waiting() // here, not on the main thread: it checks a signature
                 DispatchQueue.main.async {
                     self.busy = false
                     // Switched off meanwhile: the result is dropped, and so is anything this pass set aside.
@@ -82,7 +88,7 @@ final class Updater: ObservableObject {
                     }
                     (self.step, self.latest, self.found) = (step, latest, release)
                     // Whatever this pass ran into, a version that is set aside is still there, and the row says so.
-                    if let waiting = Self.staged(in: Self.shelf), Self.newer(waiting, than: Self.version) { self.step = .ready(waiting) }
+                    if let waiting { self.step = .ready(waiting) }
                 }
             }
             guard warpConnected() else { return show(.waiting(known?.version), false) }
@@ -204,6 +210,23 @@ final class Updater: ObservableObject {
     /// The version set aside in `shelf`, if there is a sound one.
     static func staged(in shelf: URL) -> String? { sound(shelf.appendingPathComponent("Zaslon.app")) }
 
+    /// The version that waits on Zaslon's own shelf and is newer than the running one. Runs codesign: not for the
+    /// main thread.
+    static func waiting() -> String? { staged(in: shelf).flatMap { newer($0, than: version) ? $0 : nil } }
+
+    /// Clears what a download left behind if Zaslon quit or died in the middle of one: a mounted image and its
+    /// folder in the temporary directory, and a half-made copy beside the shelf.
+    static func sweep() {
+        let files = FileManager.default
+        for (folder, prefix) in [(files.temporaryDirectory, "zaslon-update-"), (shelf.deletingLastPathComponent(), "update-incoming-")] {
+            for name in (try? files.contentsOfDirectory(atPath: folder.path)) ?? [] where name.hasPrefix(prefix) {
+                let left = folder.appendingPathComponent(name)
+                run("/usr/bin/hdiutil", ["detach", left.appendingPathComponent("mount").path, "-force"])
+                try? files.removeItem(at: left)
+            }
+        }
+    }
+
     /// Downloads the release, checks it and sets its app aside in `shelf`, replacing whatever waited there. If a
     /// check fails it throws and the shelf stays as it was. The installed app is not touched.
     static func stage(_ release: Release, in shelf: URL) throws {
@@ -230,8 +253,11 @@ final class Updater: ObservableObject {
         try files.copyItem(at: mount.appendingPathComponent("Zaslon.app"), to: app)
         run("/usr/bin/xattr", ["-dr", "com.apple.quarantine", app.path])
         guard sound(app) == release.version else { throw UpdateError("the app in the image is not Zaslon \(release.version) with an intact signature") }
-        try? files.removeItem(at: shelf)
-        try files.moveItem(at: incoming, to: shelf)
+        if files.fileExists(atPath: shelf.path) {
+            _ = try files.replaceItemAt(shelf, withItemAt: incoming) // one step: the older one is not lost if this fails
+        } else {
+            try files.moveItem(at: incoming, to: shelf)
+        }
     }
 
     /// Puts the version set aside in `shelf` in place of `bundle`, if it is sound and newer, and empties the shelf.
