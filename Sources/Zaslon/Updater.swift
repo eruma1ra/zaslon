@@ -77,16 +77,20 @@ final class Updater: ObservableObject {
                 // Switched off while this was running: stop before anything is replaced.
                 try Self.install(release, over: Bundle.main.bundleURL) { UserDefaults.standard.bool(forKey: "autoUpdate") }
                 UserDefaults.standard.set(["version": release.version, "at": Date()], forKey: "updated")
-                // The new copy starts beside this one. This one keeps watching the VPN until the new one does, and
-                // is then asked by it to leave (Main.succeed): no moment passes with nobody watching.
-                Self.run("/usr/bin/open", ["-n", Bundle.main.bundlePath, "--args", "--takeover"])
-                // Still here a minute later: the new copy did not come up. Say so and try again at the next pass.
-                DispatchQueue.main.asyncAfter(deadline: .now() + 60) { (self.step, self.busy) = (.failed(release.version), false) }
+                DispatchQueue.main.async { self.handOver() }
             } catch {
                 let off = !UserDefaults.standard.bool(forKey: "autoUpdate")
                 show(off ? .idle : release.map { .failed($0.version) } ?? .idle, false)
             }
         }
+    }
+
+    /// Starts the new copy beside this one. This one keeps watching the VPN until the new one does, and is then
+    /// asked by it to leave (Main.succeed): no moment passes with nobody watching. If the new copy does not come up,
+    /// this one is still here a minute later and simply starts it again; the new version is already on disk.
+    private func handOver() {
+        DispatchQueue.global(qos: .utility).async { Self.run("/usr/bin/open", ["-n", Bundle.main.bundlePath, "--args", "--takeover"]) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 60) { self.handOver() }
     }
 
     /// What the settings row says under its title.
