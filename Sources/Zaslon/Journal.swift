@@ -42,7 +42,7 @@ final class Journal: ObservableObject {
 
     /// Reads the file again and adds the outages that are not here yet. After a hand-over the older copy's last
     /// entries are in the file, not in this copy's memory.
-    func reload() {
+    func reload(connected: Bool) {
         guard let file, let saved = FileManager.default.contents(atPath: file).flatMap({ try? Self.coder.1.decode([Outage].self, from: $0) }) else { return }
         // An entry this copy read while the older copy still had it open was closed here as cut short. The older
         // copy has since written how it really went: its version replaces ours.
@@ -52,15 +52,16 @@ final class Journal: ObservableObject {
         let known = Set(outages.map(\.id))
         var missing = saved.filter { !known.contains($0.id) }
         // The older copy left in the middle of an outage. That is the stretch this copy is in too: one entry goes
-        // on, with the older start and both copies' facts. If the VPN is back for this copy, the stretch ended
-        // while the copies changed places.
+        // on, with the older start and both copies' facts. If this copy has none open because it started during
+        // the outage, the older entry simply stays open until this copy sees the VPN return. Only if the VPN is
+        // back for this copy did the stretch end while the copies changed places.
         if let i = missing.firstIndex(where: { $0.end == nil }) {
             var older = missing.remove(at: i)
             if outages.first?.end == nil, !outages.isEmpty {
                 let mine = outages.removeFirst()
                 older.frozen += mine.frozen.filter { !older.frozen.contains($0) }
                 older.refused += mine.refused
-            } else {
+            } else if connected {
                 older.end = Date()
             }
             missing.append(older)

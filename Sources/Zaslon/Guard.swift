@@ -273,6 +273,7 @@ final class Guard: ObservableObject {
     /// let them go, or the other way round. So everything on the list counts as possibly stopped, and the state
     /// this copy knows is applied afresh: stop signals if the VPN is down, continue signals if it is up.
     func settle() {
+        if live { Journal.shared.reload(connected: protected == true) } // first: what the older copy wrote on its way out
         let procs = list()
         for e in entries { frozen.formUnion(tree(of: e, in: procs)) }
         frozen.remove(getpid())
@@ -433,7 +434,7 @@ func selftest() {
     let later = Journal(file: journalFile)
     kept.outages.insert(Outage(start: t0 + 500, end: t0 + 520, frozen: ["ChatGPT"]), at: 0)
     kept.store(wait: true)
-    later.reload(); later.reload()
+    later.reload(connected: true); later.reload(connected: true)
     precondition(later.outages.count == 3 && later.outages[0].frozen == ["ChatGPT"], "the journal takes in an older copy's last entries")
     // The older copy left mid-outage: the new copy, itself in that outage, goes on with one entry.
     kept.outages = [Outage(start: t0 + 900, frozen: ["Claude"], refused: 2)]
@@ -441,7 +442,7 @@ func selftest() {
     let heir = Journal(file: nil)
     heir.mark(connected: false, at: t0 + 901); heir.froze(["ChatGPT"]); heir.refuse()
     let inherited = Journal(file: journalFile, open: heir.outages)
-    inherited.reload()
+    inherited.reload(connected: false)
     precondition(inherited.outages.count == 1 && inherited.outages[0].start == t0 + 900 && inherited.outages[0].end == nil
         && inherited.outages[0].frozen == ["Claude", "ChatGPT"] && inherited.outages[0].refused == 3, "an outage in progress is carried over as one entry")
     // The new copy read the file while the older copy still had the outage open, and closed its own reading of
@@ -453,8 +454,17 @@ func selftest() {
     kept.outages[0].end = t0 + 2030
     kept.outages[0].refused = 4
     kept.store(wait: true)
-    early.reload()
+    early.reload(connected: true)
     precondition(early.outages.count == 1 && early.outages[0].cut == nil && early.outages[0].refused == 4, "the older copy's version of a shared entry replaces the cut one")
+    try? FileManager.default.removeItem(atPath: journalFile)
+    // A copy that started during the outage has no entry of its own: the inherited one stays open until the VPN is back.
+    kept.outages = [Outage(start: t0 + 3000, frozen: ["Claude"])]
+    kept.store(wait: true)
+    let newcomer = Journal(file: journalFile, open: [])
+    newcomer.reload(connected: false)
+    precondition(newcomer.outages.count == 1 && newcomer.outages[0].end == nil, "an inherited outage stays open while the VPN is down")
+    newcomer.mark(connected: true, at: t0 + 3040)
+    precondition(newcomer.outages[0].end == t0 + 3040, "and closes when the VPN returns")
     try? FileManager.default.removeItem(atPath: journalFile)
     // After a hand-over the remaining copy applies its state to everything on the list, whoever stopped it.
     var settled: [pid_t: Int32] = [:]
