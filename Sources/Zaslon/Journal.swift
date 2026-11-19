@@ -21,9 +21,10 @@ final class Journal: ObservableObject {
     private var saving = false
     private static let disk = DispatchQueue(label: "zaslon.journal") // one writer, so files land in the order they were made
 
-    /// `file: nil` keeps the journal in memory only (tests).
-    init(file: String?) {
+    /// `file: nil` keeps the journal in memory only (tests). `open` starts from these entries and does not read the file (tests).
+    init(file: String?, open: [Outage]? = nil) {
         self.file = file
+        if let open { outages = open; return }
         guard let file, let saved = FileManager.default.contents(atPath: file).flatMap({ try? Self.coder.1.decode([Outage].self, from: $0) }) else { return }
         // An outage left open by a crash or a quit: when it ended is not known. It is closed and marked as cut short.
         outages = saved.map { o in
@@ -44,7 +45,21 @@ final class Journal: ObservableObject {
     func reload() {
         guard let file, let saved = FileManager.default.contents(atPath: file).flatMap({ try? Self.coder.1.decode([Outage].self, from: $0) }) else { return }
         let known = Set(outages.map(\.id))
-        let missing = saved.filter { !known.contains($0.id) }
+        var missing = saved.filter { !known.contains($0.id) }
+        // The older copy left in the middle of an outage. That is the stretch this copy is in too: one entry goes
+        // on, with the older start and both copies' facts. If the VPN is back for this copy, the stretch ended
+        // while the copies changed places.
+        if let i = missing.firstIndex(where: { $0.end == nil }) {
+            var older = missing.remove(at: i)
+            if outages.first?.end == nil, !outages.isEmpty {
+                let mine = outages.removeFirst()
+                older.frozen += mine.frozen.filter { !older.frozen.contains($0) }
+                older.refused += mine.refused
+            } else {
+                older.end = Date()
+            }
+            missing.append(older)
+        }
         guard !missing.isEmpty else { return }
         outages = Array((outages + missing).sorted { $0.start > $1.start }.prefix(50))
         save()

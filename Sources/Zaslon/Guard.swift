@@ -424,6 +424,15 @@ func selftest() {
     kept.store(wait: true)
     later.reload(); later.reload()
     precondition(later.outages.count == 3 && later.outages[0].frozen == ["ChatGPT"], "the journal takes in an older copy's last entries")
+    // The older copy left mid-outage: the new copy, itself in that outage, goes on with one entry.
+    kept.outages = [Outage(start: t0 + 900, frozen: ["Claude"], refused: 2)]
+    kept.store(wait: true)
+    let heir = Journal(file: nil)
+    heir.mark(connected: false, at: t0 + 901); heir.froze(["ChatGPT"]); heir.refuse()
+    let inherited = Journal(file: journalFile, open: heir.outages)
+    inherited.reload()
+    precondition(inherited.outages.count == 1 && inherited.outages[0].start == t0 + 900 && inherited.outages[0].end == nil
+        && inherited.outages[0].frozen == ["Claude", "ChatGPT"] && inherited.outages[0].refused == 3, "an outage in progress is carried over as one entry")
     try? FileManager.default.removeItem(atPath: journalFile)
     // Updates: versions compare as numbers, and a release counts only with a disk image and its SHA-256.
     precondition(Updater.newer("1.10.0", than: "1.9.3") && Updater.newer("1.2", than: "1.1.9") && !Updater.newer("1.2.0", than: "1.2") && !Updater.newer("1.1.0", than: "1.2.0"), "versions compare number by number")
