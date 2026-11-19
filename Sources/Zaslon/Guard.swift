@@ -291,15 +291,11 @@ func selftest() {
     // Which VPN: a choice made by hand wins; "auto" takes WARP when it is installed.
     precondition(Vpn.pick("auto", warpInstalled: true) == .warp && Vpn.pick("auto", warpInstalled: false) == .happ)
     precondition(Vpn.pick("happ", warpInstalled: true) == .happ && Vpn.pick("warp", warpInstalled: false) == .warp)
-    let vpns = """
-        Available network connection services in the current set (*=enabled):
-        * (Disconnected)   8E2B3C4D-0000-4000-8000-AAAAAAAAAAAA VPN (com.wireguard.macos) "home" [VPN:com.wireguard.macos]
-        * (Connected)      0F1E2D3C-1111-4111-8111-BBBBBBBBBBBB VPN (com.example.happ) "Happ"   [VPN:com.example.happ]
-        """
-    precondition(parseVpnList(vpns, name: "happ") == "0F1E2D3C-1111-4111-8111-BBBBBBBBBBBB")
-    precondition(parseVpnList(vpns, name: "home") == nil && parseVpnList(vpns.replacingOccurrences(of: "(Connected)", with: "(Connecting)"), name: "happ") == nil)
-    precondition(parseVpnInterface("Connected\nExtended Status <dictionary> {\n  IPv4 : <dictionary> {\n    InterfaceName : utun6\n  }\n}") == "utun6")
-    precondition(parseVpnInterface("Connected\nExtended Status <dictionary> {\n  Status : 2\n}") == nil)
+    // A tunnel is Happ's when a process from inside the Happ app holds it; the name is matched on the app, not on the whole path.
+    precondition(inApp("/Applications/Happ.app/Contents/PlugIns/Tunnel.appex/Contents/MacOS/Tunnel", named: "happ"))
+    precondition(inApp("/Applications/Happ - Proxy Utility.app/Contents/MacOS/Happ", named: "happ"))
+    precondition(!inApp("/Users/chappell/Tools/Other.app/Contents/MacOS/Other", named: "happ") && !inApp("/usr/local/bin/happ", named: "happ"))
+    precondition(tunnelsHeld(by: getpid()).isEmpty && happTunnels([]).isEmpty, "this process holds no tunnel; no Happ process, no tunnel")
 
     // Logic on a fake process table.
     let app = Entry(name: "App", matches: ["/Applications/App.app", "tool"])

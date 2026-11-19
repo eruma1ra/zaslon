@@ -759,7 +759,7 @@ struct SettingsView: View {
                         chip(name, on: vpn == code) {
                             guard vpn != code else { return }
                             vpn = code
-                            UserDefaults.standard.set(code, forKey: "vpn")
+                            Vpn.choose(code)
                             g.trip() // freeze first; only an answer about the VPN now chosen thaws the list
                         }
                     }

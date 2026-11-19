@@ -161,13 +161,13 @@ The journal holds the last 50 outages in `~/Library/Application Support/Zaslon/j
 
 Zaslon watches one VPN. The settings say which: **Auto**, **WARP** or **Happ**.
 
-- **Auto** looks at what is installed: WARP if `warp-cli` is there, otherwise Happ. The row shows which one it took.
+- **Auto** looks at what is installed: WARP if `warp-cli` is there, otherwise Happ. The row shows which one it took. This is settled when Zaslon starts; installing or removing a VPN later does not move the watch.
 - **WARP** is asked through `warp-cli status`, as described above.
-- **Happ** is a VPN that macOS itself lists. Zaslon asks macOS (`scutil --nc list`) whether Happ's configuration is connected and which tunnel interface is its own, and pins the gate to that tunnel. The protocol inside Happ (VLESS, Reality, Trojan and so on) makes no difference: Zaslon sees only the tunnel. Happ must run as a system-wide tunnel (TUN); as a plain local proxy it has no tunnel and Zaslon keeps the list frozen.
+- **Happ** has no such command, so Zaslon asks the kernel which tunnel interface a process of the Happ app holds open. That tunnel, while it is up, is Happ's; no other tunnel counts, so WARP's is never taken for it. The gate is pinned to it. The protocol inside Happ (VLESS, Reality, Trojan and so on) makes no difference: Zaslon sees only the tunnel. Happ must run as a system-wide tunnel (TUN); as a plain local proxy it has no tunnel and Zaslon keeps the list frozen.
 
 Zaslon never moves from one VPN to the other by itself. If the watched one drops while another is up, the list stays frozen until the watched one is back. Changing the setting freezes the list first; only an answer about the newly chosen VPN thaws it. Connections the gate already opened stay on the tunnel they were pinned to.
 
-**Not tried on a real Happ.** The Mac this was built on runs WARP and may not run without it. What was checked: with the setting on Happ and no Happ present, Zaslon reports "not connected", names no tunnel (WARP's tunnel is not taken for Happ's) and the tunnel proxy refuses every connection. `Zaslon --vpn` prints what Zaslon sees; if Happ is connected and that line says it is not, open an issue with the output. A client other than Happ that macOS lists under VPN can be tried with `defaults write local.zaslon vpnName <part of its name>`.
+**Not tried on a real Happ.** The Mac this was built on runs WARP and may not run without it. What was checked: with the setting on Happ and no Happ present, Zaslon reports "not connected", names no tunnel (WARP's tunnel is not taken for Happ's) and the tunnel proxy refuses every connection. `Zaslon --vpn` prints what Zaslon sees, and every tunnel holder it can read; if Happ is connected and the first line says it is not, open an issue with the output. A build of Happ that keeps its tunnel in a helper running as root cannot be read and stays "not connected". Another client can be tried with `defaults write local.zaslon vpnName <part of its app's name>`.
 
 ## Requirements
 
@@ -257,7 +257,7 @@ Everything runs from the binary inside the bundle, `Zaslon.app/Contents/MacOS/Za
 
 ## Limits
 
-- Cloudflare WARP and Happ. The Happ mode has not been tried on a real Happ. If macOS does not name Happ's tunnel interface, every tunnel with an IPv4 address counts as its own.
+- Cloudflare WARP and Happ. The Happ mode has not been tried on a real Happ.
 - The freeze has a window of up to 50 ms, and the kernel keeps receiving on open connections.
 - The gate knows two services, at fixed paths: `/Applications/ChatGPT.app` and `/Applications/Claude.app`. The list is in `Gate.swift`.
 - One address per name, IPv4 only. The DNS answerer gives no IPv6 answer, so programs use IPv4.
