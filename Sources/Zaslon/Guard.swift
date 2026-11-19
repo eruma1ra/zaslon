@@ -157,8 +157,7 @@ final class Guard: ObservableObject {
 
     init(entries: [Entry]? = nil, live: Bool = true) {
         self.live = live
-        let saved = UserDefaults.standard.data(forKey: "entries").flatMap { try? JSONDecoder().decode([Entry].self, from: $0) }
-        self.entries = entries ?? (live ? saved : nil) ?? Entry.defaults
+        self.entries = entries ?? (live ? Self.saved : nil) ?? Entry.defaults
         guard live else { return }
         // warp-cli is asked twice a second while all is well, and ten times a second during a drop, so that a
         // program started meanwhile is frozen within a tenth of a second and the thaw comes quickly.
@@ -271,13 +270,20 @@ final class Guard: ObservableObject {
     /// Stops everything on the list and leaves it stopped, for a restart of Zaslon itself: while no copy is
     /// running nobody would notice a drop, so the apps wait. The next copy freezes first anyway and thaws them
     /// with its first "connected" answer.
-    func holdAll() {
-        let procs = list()
+    func holdAll() { frozen = Self.hold(entries, in: list(), signal) }
+
+    /// The list as the user left it, or nil if none was saved yet.
+    static var saved: [Entry]? { UserDefaults.standard.data(forKey: "entries").flatMap { try? JSONDecoder().decode([Entry].self, from: $0) } }
+
+    /// Stops the protected trees of these entries and says which processes it stopped. Also used at start-up,
+    /// before there is a guard: an update put in place then delays the moment the guard begins, and the apps
+    /// wait stopped for it instead of running unwatched.
+    @discardableResult static func hold(_ entries: [Entry], in procs: [Proc] = listProcs(), _ signal: (pid_t, Int32) -> Void = { _ = kill($0, $1) }) -> Set<pid_t> {
         var all = Set<pid_t>()
         for e in entries where e.off != true { all.formUnion(tree(of: e, in: procs)) }
         all.remove(getpid())
         for pid in all { signal(pid, SIGSTOP) }
-        frozen = all
+        return all
     }
 }
 

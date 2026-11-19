@@ -41,9 +41,15 @@ enum Main {
         onlyOne()
         // A version downloaded earlier is put in place now, before anything is watched, and Zaslon starts once more
         // from the new files. This is the only moment an update touches the app.
-        if Updater.applyAtStart() {
-            relaunchSoon()
-            exit(0)
+        if Updater.pending {
+            // The swap and the second start put off the moment the guard begins by a few seconds. The apps on the
+            // list wait stopped for it: the guard that comes up freezes first anyway and lets them go with its
+            // first "connected" answer. If nothing gets applied after all, the guard of this very start does that.
+            Guard.hold(Guard.saved ?? Entry.defaults)
+            if Updater.applyAtStart() {
+                relaunchSoon()
+                exit(0)
+            }
         }
         ZaslonApp.main()
     }

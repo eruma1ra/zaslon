@@ -69,6 +69,7 @@ final class Updater: ObservableObject {
         guard on, !Self.brewed, !busy else { return }
         let asked = UserDefaults.standard.object(forKey: "updateAsked") as? Date ?? .distantPast
         let (known, due) = (found, force || Date().timeIntervalSince(asked) > 86400)
+        let ready: String? = { if case .ready(let version) = step { return version } else { return nil } }()
         guard known != nil || due else { return }
         busy = true
         DispatchQueue.global(qos: .utility).async {
@@ -84,7 +85,8 @@ final class Updater: ObservableObject {
                     (self.step, self.latest, self.found) = (step, latest, release)
                 }
             }
-            guard warpConnected() else { return show(.waiting(known?.version), false) }
+            // Without the VPN nothing is asked; a version already set aside stays ready, with its Restart button.
+            guard warpConnected() else { return show(ready.map { .ready($0) } ?? .waiting(known?.version), false) }
             do {
                 if due {
                     release = try Self.latest(Self.fetch(URL(string: Self.feed)!), from: URL(string: Self.feed)!)
@@ -137,11 +139,15 @@ final class Updater: ObservableObject {
         }
     }
 
+    /// Whether a version is set aside and may be put in place at this start. Cheap: looks at a folder and a setting.
+    static var pending: Bool {
+        !brewed && UserDefaults.standard.bool(forKey: "autoUpdate") && FileManager.default.fileExists(atPath: shelf.appendingPathComponent("Zaslon.app").path)
+    }
+
     /// Called when Zaslon starts, before it watches anything: puts a version set aside earlier in place of the
     /// app. True if it did, and the caller then starts Zaslon again from the new files.
     static func applyAtStart() -> Bool {
-        guard !brewed, UserDefaults.standard.bool(forKey: "autoUpdate") else { return false }
-        guard let new = try? apply(from: shelf, over: Bundle.main.bundleURL) else { return false }
+        guard pending, let new = try? apply(from: shelf, over: Bundle.main.bundleURL) else { return false }
         UserDefaults.standard.set(["version": new, "at": Date()], forKey: "updated")
         return true
     }
