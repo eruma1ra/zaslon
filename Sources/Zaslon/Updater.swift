@@ -145,9 +145,10 @@ final class Updater: ObservableObject {
 
     /// Zaslon's own requests go through its tunnel proxy, so they are pinned to the VPN like everything behind the
     /// gate: if the VPN drops between the check and the request, the request fails instead of leaving another way.
+    static var proxyPort = TunnelProxy.port // `--update` runs its own proxy on another port
     private static let session: URLSession = {
         let through = URLSessionConfiguration.ephemeral
-        through.connectionProxyDictionary = ["HTTPSEnable": 1, "HTTPSProxy": "127.0.0.1", "HTTPSPort": Int(TunnelProxy.port)]
+        through.connectionProxyDictionary = ["HTTPSEnable": 1, "HTTPSProxy": "127.0.0.1", "HTTPSPort": Int(proxyPort)]
         through.timeoutIntervalForResource = 120
         return URLSession(configuration: through)
     }()

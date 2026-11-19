@@ -25,6 +25,11 @@ enum Main {
         }
         // --update <app> [feed]: bring that copy of the app up to the latest release, in the open (tests).
         if let i = args.firstIndex(of: "--update"), i + 1 < args.count {
+            // Its own tunnel proxy on a spare port: the tray app may not be running, and the requests must be pinned
+            // to the VPN all the same. A moment for the listener to come up.
+            Updater.proxyPort = 47801
+            TunnelProxy.shared.start(port: Updater.proxyPort)
+            usleep(300_000)
             exit(Updater.once(bundle: URL(fileURLWithPath: args[i + 1]), feed: i + 2 < args.count ? args[i + 2] : Updater.feed))
         }
         // --through <app>: start the app through the tunnel proxy, exactly as the button in the window does (tests).
